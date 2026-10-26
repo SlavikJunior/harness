@@ -13,6 +13,7 @@ import {
   normalizeInstructionContent,
   renderInstructionBlocks,
 } from "./instructions.js"
+import { createReferenceLink } from "./link.js"
 
 /** Исполнение плана: приводит проект к DesiredState (идемпотентно). */
 
@@ -144,7 +145,7 @@ export async function applyDesired(
     if ((skill.entry.mode ?? "vendor") === "reference") {
       await fs.mkdir(path.dirname(targetDir), { recursive: true })
       await fs.rm(targetDir, { recursive: true, force: true })
-      await fs.symlink(skill.sourceDir, targetDir, "dir")
+      await createReferenceLink(skill.sourceDir, targetDir)
     } else {
       await copyDir(skill.sourceDir, targetDir)
     }

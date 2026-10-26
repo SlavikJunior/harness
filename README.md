@@ -42,7 +42,7 @@ harness plan --json > plan.json && harness doctor --strict
 |---|---|
 | `.opencode/opencode.jsonc` | Файл **владеет** только harness. Правки — точечные (jsonc-parser), комментарии сохраняются. Пользовательский `opencode.json` никогда не изменяется |
 | Скиллы `vendor` | Копия в `.opencode/skills/<name>/` — OpenCode находит их автоматически, в конфиг не пишется |
-| Скиллы `reference` | Symlink в `.opencode/skills/<name>` → зеркало источника. Тоже без записи в конфиг |
+| Скиллы `reference` | Symlink в `.opencode/skills/<name>` → зеркало источника (Windows: junction). Тоже без записи в конфиг |
 | MCP-серверы | `.opencode/opencode.jsonc` → `mcp.servers.<name>`. OpenCode deep-merge'ит по серверам — чужие серверы не затираются |
 | `config.*` | Passthrough: значения пишутся как top-level ключи управляемого конфига |
 | `permissions` | Top-level массив правил V2 `{ action, resource, effect }` — пишется как есть, порядок значим |
@@ -201,6 +201,7 @@ npm run build           # tsc → dist/
   нормализуется к LF
 - `permissions` управляются только на top-level; `policies` и
   `agents.<id>.permissions` — вне MVP
-- Symlink в reference-режиме: POSIX; на Windows требуется dev-режим
+- Symlink в reference-режиме на POSIX; на Windows — junction (без прав, но
+  только локальные пути, не UNC). Если junction недоступен — `mode: vendor`
 - Секреты: аудит — только предупреждения (без блокировки apply); проверка на
   энтропию строк не делается — только известные форматы, URL и имена ключей

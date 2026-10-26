@@ -8,6 +8,7 @@ import { MANAGED_CONFIG_FILE } from "../manifest/file.js"
 import type { PermissionRule, SkillMode } from "../manifest/schema.js"
 import { validateJsoncText } from "./config.js"
 import { skillTargetDir } from "./desired.js"
+import { sameLinkTarget } from "./link.js"
 import type { DesiredState } from "./types.js"
 import type { HarnessState, StateSkill } from "./state.js"
 import type { PlanAction, PlanItem, PlanReport } from "./types.js"
@@ -420,13 +421,17 @@ async function assessSkill(
       warn: recorded !== undefined ? "ссылка пропала — будет восстановлена" : undefined,
     }
   }
-  if (link === skill.sourceDir) return { kind: "skill", action: "unchanged", target }
+  if (sameLinkTarget(link, targetDir, skill.sourceDir)) {
+    return { kind: "skill", action: "unchanged", target }
+  }
+  const editedTarget =
+    recorded?.target !== undefined && !sameLinkTarget(link, targetDir, recorded.target)
   return {
     kind: "skill",
     action: "update",
     target,
     detail: `reference → ${skill.sourceDir}`,
-    warn: recorded?.target !== undefined && recorded.target !== link ? "цель правилась вне harness" : undefined,
+    warn: editedTarget ? "цель правилась вне harness" : undefined,
   }
 }
 

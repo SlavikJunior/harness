@@ -15,7 +15,7 @@ export function draftManifest(detection: DetectResult): string {
 version: 1
 
 # Скиллы: vendor — копия в .opencode/skills/ (пин в git проекта),
-#         reference — symlink в общее зеркало (обновляется: harness apply --refresh).
+#         reference — symlink в зеркало (обновляется: harness apply --refresh); Windows — junction.
 # ref фиксирует тег/ветку/sha repo-источника (для local не поддерживается).
 # Пример:
 #   skills:
