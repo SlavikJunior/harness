@@ -64,6 +64,7 @@ async function buildNextState(desired: DesiredState): Promise<HarnessState> {
       mode,
       ref: skill.sourceRef,
       at: state.appliedAt,
+      ...(skill.entry.ref === undefined ? {} : { pin: skill.entry.ref }),
     }
     if (mode === "vendor") record.sha = await hashSkillDir(skill.sourceDir)
     else record.target = skill.sourceDir

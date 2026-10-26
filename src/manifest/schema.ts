@@ -14,6 +14,8 @@ export const skillEntrySchema = z
     source: z.string().min(1),
     /** имя скилла (frontmatter `name` в SKILL.md) */
     name: z.string().min(1),
+    /** тег/ветка/sha для repo-источника: фиксирует версию скилла */
+    ref: z.string().regex(/^\S+$/, "ref не должен содержать пробелов").optional(),
     /** vendor — копия в .opencode/skills/; reference — symlink в зеркало (default: vendor) */
     mode: skillModeSchema.optional(),
   })

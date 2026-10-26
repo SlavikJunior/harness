@@ -1,7 +1,7 @@
 import { Command } from "commander"
 import { loadManifest } from "../manifest/load.js"
 import { buildCatalog } from "../catalog/index.js"
-import { buildDesiredState } from "../apply/desired.js"
+import { buildDesiredState, catalogRefs } from "../apply/desired.js"
 import { computePlan } from "../apply/plan.js"
 import { loadState } from "../apply/state.js"
 import { scanManifest } from "../secrets/scan.js"
@@ -15,7 +15,7 @@ export const planCommand = new Command("plan")
   .action(async () => {
     const projectRoot = process.cwd()
     const manifest = await loadManifest(projectRoot)
-    const catalog = await buildCatalog({})
+    const catalog = await buildCatalog({ refs: catalogRefs(manifest) })
     const desired = buildDesiredState(projectRoot, manifest, catalog)
     const state = await loadState(projectRoot)
     const plan = await computePlan(projectRoot, desired, state)

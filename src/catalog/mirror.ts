@@ -2,7 +2,7 @@ import os from "node:os"
 import path from "node:path"
 import { promises as fs } from "node:fs"
 import { HarnessError } from "../core/errors.js"
-import { isDirectory } from "../core/fs.js"
+import { isDirectory, sha256 } from "../core/fs.js"
 import { run, runChecked } from "../core/exec.js"
 import type { SourceDef } from "./types.js"
 
@@ -12,6 +12,10 @@ import type { SourceDef } from "./types.js"
  * repo-источник клонируется (shallow) в XDG data dir; перед клоном ищется
  * существующий клон с тем же remote (например ручной git clone в
  * ~/.config/opencode/skills/*) и переиспользуется вместо переклонирования.
+ *
+ * Pin: каждый ref (тег/ветка/sha) живёт в отдельном зеркале `<id>@<ref>-<hash>` —
+ * одному зеркалу нельзя одновременно соответствовать разным ref, а проекты
+ * могут пинить разные версии одного источника.
  */
 
 export function mirrorsRoot(): string {
@@ -29,6 +33,12 @@ export interface Mirror {
   ref: string
   /** зеркало — переиспользованный ручной клон */
   reused: boolean
+}
+
+/** Имя директории зеркала для ref: читаемое + короткий хеш от полного ref. */
+export function pinnedMirrorDir(sourceId: string, ref: string): string {
+  const readable = ref.replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 40)
+  return path.join(mirrorsRoot(), `${sourceId}@${readable}-${sha256(ref).slice(0, 8)}`)
 }
 
 async function gitRemote(dir: string): Promise<string | undefined> {
@@ -78,16 +88,43 @@ async function pull(dir: string, sourceId: string): Promise<void> {
   }
 }
 
+/** Клон/обновление зеркала на конкретный ref (тег, ветка или sha). */
+async function fetchPinned(dir: string, url: string, ref: string, sourceId: string): Promise<void> {
+  if (!(await isDirectory(path.join(dir, ".git")))) {
+    await runChecked("git", ["init", "-q", dir])
+    await runChecked("git", ["-C", dir, "remote", "add", "origin", url])
+  } else {
+    /* URL источника мог измениться в sources.yaml — зеркало остаётся валидным */
+    await runChecked("git", ["-C", dir, "remote", "set-url", "origin", url])
+  }
+
+  const fetched = await run("git", ["-C", dir, "fetch", "--depth", "1", "origin", ref])
+  if (fetched.code !== 0) {
+    throw new HarnessError(
+      `Не удалось получить ref "${ref}" источника "${sourceId}"`,
+      fetched.stderr.trim() || "проверь, что тег/ветка/sha существует в репозитории",
+    )
+  }
+  await runChecked("git", ["-C", dir, "checkout", "--detach", "-q", "FETCH_HEAD"])
+}
+
 /**
  * Гарантирует наличие актуального зеркала источника.
- * refresh — обновить shallow-клон (git pull --ff-only).
+ * refresh — обновить shallow-клон (git pull --ff-only или fetch нужного ref).
+ * ref — зафиксировать тег/ветку/sha (только для repo-источников).
  */
 export async function ensureMirror(
   sourceId: string,
   def: SourceDef,
-  options: { refresh?: boolean } = {},
+  options: { refresh?: boolean; ref?: string } = {},
 ): Promise<Mirror> {
   if (def.type === "local") {
+    if (options.ref !== undefined) {
+      throw new HarnessError(
+        `local-источник "${sourceId}" не поддерживает ref="${options.ref}"`,
+        "ref работает только для repo-источников: тег, ветка или sha git",
+      )
+    }
     const dir = path.resolve(def.path === "~" || def.path.startsWith("~/")
       ? path.join(os.homedir(), def.path.slice(1))
       : def.path)
@@ -97,10 +134,27 @@ export async function ensureMirror(
     return { dir, ref: dir, reused: true }
   }
 
-  const mirrorDir = path.join(mirrorsRoot(), sourceId)
+  const pinned = options.ref !== undefined
+  const mirrorDir = pinned ? pinnedMirrorDir(sourceId, options.ref as string) : path.join(mirrorsRoot(), sourceId)
   let dir: string
   let reused = false
-  if (await isDirectory(path.join(mirrorDir, ".git"))) {
+
+  if (pinned) {
+    const ref = options.ref as string
+    const hasHead = (await isDirectory(path.join(mirrorDir, ".git"))) && (await gitHead(mirrorDir)) !== undefined
+    if (!hasHead) {
+      try {
+        await fetchPinned(mirrorDir, def.url, ref, sourceId)
+      } catch (error) {
+        /* недокачанный клон не должен блокировать повторную попытку */
+        await fs.rm(mirrorDir, { recursive: true, force: true })
+        throw error
+      }
+    } else if (options.refresh === true) {
+      await fetchPinned(mirrorDir, def.url, ref, sourceId)
+    }
+    dir = mirrorDir
+  } else if (await isDirectory(path.join(mirrorDir, ".git"))) {
     dir = mirrorDir
   } else {
     const reusedClone = await findExistingClone(def.url)
@@ -113,10 +167,13 @@ export async function ensureMirror(
     }
   }
 
-  if (options.refresh === true) await pull(dir, sourceId)
+  if (options.refresh === true && !pinned) await pull(dir, sourceId)
   const ref = await gitHead(dir)
   if (ref === undefined) {
-    throw new HarnessError(`Зеркало "${sourceId}": не удалось определить HEAD (${dir})`)
+    throw new HarnessError(
+      `Зеркало "${sourceId}": не удалось определить HEAD (${dir})`,
+      "удали директорию зеркала и повтори команду",
+    )
   }
   return { dir, ref, reused }
 }

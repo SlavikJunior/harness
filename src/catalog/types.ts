@@ -21,6 +21,8 @@ export interface SkillItem {
   relDir: string
   /** ref зеркала (sha коммита для git, путь для local) */
   ref: string
+  /** запрошенный pin (тег/ветка/sha) или undefined для HEAD */
+  pin?: string
 }
 
 export interface CatalogIndex {

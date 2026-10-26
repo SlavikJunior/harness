@@ -48,7 +48,12 @@ export function parseFrontmatter(text: string): SkillFrontmatter {
 }
 
 /** Скан директории зеркала → список скиллов. */
-export async function scanMirror(root: string, sourceId: string, sourceRef: string): Promise<SkillItem[]> {
+export async function scanMirror(
+  root: string,
+  sourceId: string,
+  sourceRef: string,
+  pin?: string,
+): Promise<SkillItem[]> {
   const found: { dir: string; relDir: string }[] = []
   const queue: { dir: string; rel: string; depth: number }[] = [{ dir: root, rel: "", depth: 0 }]
   const visited = new Set<string>()
@@ -92,6 +97,7 @@ export async function scanMirror(root: string, sourceId: string, sourceRef: stri
       dir: skill.dir,
       relDir: skill.relDir === "" ? dirName : skill.relDir,
       ref: sourceRef,
+      ...(pin === undefined ? {} : { pin }),
     })
   }
   return skills.toSorted((a, b) => a.source.localeCompare(b.source) || a.name.localeCompare(b.name))

@@ -36,16 +36,36 @@ export function installNames(entries: SkillEntry[]): Map<number, string> {
   return result
 }
 
+/** Какие refs источника нужны манифесту: undefined — HEAD, строка — пин. */
+export function catalogRefs(manifest: Manifest): Record<string, (string | undefined)[]> {
+  const result = new Map<string, Set<string | undefined>>()
+  for (const entry of manifest.skills ?? []) {
+    const set = result.get(entry.source) ?? new Set<string | undefined>()
+    set.add(entry.ref)
+    result.set(entry.source, set)
+  }
+  return Object.fromEntries([...result].map(([source, set]) => [source, [...set]]))
+}
+
 function resolveSkill(catalog: CatalogIndex, entry: SkillEntry): SkillItem {
-  const candidates = catalog.skills.filter((item) => item.source === entry.source)
-  if (candidates.length === 0) {
+  const all = catalog.skills.filter((item) => item.source === entry.source)
+  if (all.length === 0) {
     throw new HarnessError(
       `Скилл ${entry.name}: источник "${entry.source}" не найден или пуст`,
       "Список источников: harness skills list",
     )
   }
+  /* pin: у источника могут быть зеркала разных refs — берём только нужный */
+  const candidates = all.filter((item) => item.pin === entry.ref)
   const exact = candidates.find((item) => item.name === entry.name)
   if (exact !== undefined) return exact
+  if (candidates.length === 0) {
+    const pins = [...new Set(all.map((item) => item.pin ?? "HEAD"))].join(", ")
+    throw new HarnessError(
+      `Скилл ${entry.name}: источник "${entry.source}" не зеркалирован на ref "${entry.ref}"`,
+      `Доступные refs: ${pins}. Проверь ref в манифесте`,
+    )
+  }
   const similar = candidates
     .filter((item) => item.name.includes(entry.name) || entry.name.includes(item.name))
     .slice(0, 5)
@@ -65,7 +85,31 @@ export function buildDesiredState(
     assertSafeName(entry.name, "name")
     assertSafeName(entry.source, "source")
   })
+  const seen = new Set<string>()
+  for (const entry of entries) {
+    const key = `${entry.source}\u0000${entry.name}\u0000${entry.ref ?? ""}`
+    if (seen.has(key)) {
+      throw new HarnessError(
+        `Скилл ${entry.source}/${entry.name} указан в манифесте дважды`,
+        "Оставь одну запись на скилл",
+      )
+    }
+    seen.add(key)
+  }
   const names = installNames(entries)
+  const targets = new Map<string, string>()
+  entries.forEach((entry, index) => {
+    const installName = names.get(index) as string
+    const key = `${entry.source}/${entry.name}${entry.ref === undefined ? "" : `@${entry.ref}`}`
+    const existing = targets.get(installName)
+    if (existing !== undefined) {
+      throw new HarnessError(
+        `Конфликт установки: ${existing} и ${key} ставятся в одну директорию "${installName}"`,
+        "Для одного скилла можно указать только один ref",
+      )
+    }
+    targets.set(installName, key)
+  })
 
   const skills: DesiredSkill[] = entries.map((entry, index) => {
     const item = resolveSkill(catalog, entry)

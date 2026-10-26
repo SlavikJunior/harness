@@ -19,6 +19,8 @@ export interface StateSkill {
   mode: SkillMode
   /** ref зеркала на момент применения */
   ref: string
+  /** запрошенный пин (тег/ветка/sha), если был */
+  pin?: string
   /** хеш содержимого (vendor) или целевой путь (reference) */
   sha?: string
   target?: string
@@ -82,6 +84,7 @@ const skillStateSchema = z.object({
   name: z.string().min(1),
   mode: z.enum(["vendor", "reference"]),
   ref: z.string().min(1),
+  pin: z.string().min(1).optional(),
   sha: z.string().optional(),
   target: z.string().optional(),
   at: z.string().min(1),

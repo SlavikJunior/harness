@@ -16,10 +16,12 @@ version: 1
 
 # Скиллы: vendor — копия в .opencode/skills/ (пин в git проекта),
 #         reference — symlink в общее зеркало (обновляется: harness apply --refresh).
+# ref фиксирует тег/ветку/sha repo-источника (для local не поддерживается).
 # Пример:
 #   skills:
 #     - source: android-skills
 #       name: navigation-3
+#       ref: v1.1.0
 #       mode: vendor
 skills: []
 

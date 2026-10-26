@@ -5,6 +5,7 @@ import { fail } from "../core/log.js"
 import { initCommand } from "./init.js"
 import { planCommand } from "./plan.js"
 import { applyCommand } from "./apply.js"
+import { updateCommand } from "./update.js"
 import { doctorCommand } from "./doctor.js"
 import { addCommand } from "./add.js"
 import { skillsCommand } from "./skills.js"
@@ -21,6 +22,7 @@ program
 program.addCommand(initCommand)
 program.addCommand(planCommand)
 program.addCommand(applyCommand)
+program.addCommand(updateCommand)
 program.addCommand(doctorCommand)
 program.addCommand(addCommand)
 program.addCommand(skillsCommand)

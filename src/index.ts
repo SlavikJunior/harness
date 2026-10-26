@@ -2,7 +2,7 @@ export { loadManifest, validateManifestText, MANIFEST_PATH } from "./manifest/lo
 export { manifestSchema, type Manifest, type SkillEntry, type SkillMode, type MCPServer } from "./manifest/schema.js"
 export { detectStacks, type DetectResult } from "./detect/index.js"
 export { buildCatalog, parseFrontmatter, scanMirror, ensureMirror, mirrorsRoot, sourcesFile, loadSources } from "./catalog/index.js"
-export { buildDesiredState, SKILLS_DIR } from "./apply/desired.js"
+export { buildDesiredState, catalogRefs, SKILLS_DIR } from "./apply/desired.js"
 export { computePlan } from "./apply/plan.js"
 export { applyDesired } from "./apply/apply.js"
 export {

@@ -3,7 +3,7 @@ import { run } from "../core/exec.js"
 import { loadManifest } from "../manifest/load.js"
 import { MANAGED_CONFIG_FILE } from "../manifest/file.js"
 import { buildCatalog } from "../catalog/index.js"
-import { buildDesiredState } from "../apply/desired.js"
+import { buildDesiredState, catalogRefs } from "../apply/desired.js"
 import { computePlan } from "../apply/plan.js"
 import { loadState } from "../apply/state.js"
 import { validateJsoncText } from "../apply/config.js"
@@ -54,7 +54,7 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
   /* Каталог + разрешение скиллов */
   let desired
   try {
-    const catalog = await buildCatalog({})
+    const catalog = await buildCatalog({ refs: catalogRefs(manifest) })
     desired = buildDesiredState(projectRoot, manifest, catalog)
     if (desired.skills.length > 0) {
       push("ok", `скиллы разрешены: ${desired.skills.map((skill) => skill.installName).join(", ")}`)

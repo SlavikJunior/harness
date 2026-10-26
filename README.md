@@ -15,6 +15,7 @@ harness add skill android-skills/navigation-3        # добавить скил
 harness add mcp playwright --local bunx @playwright/mcp
 harness plan              # предпросмотр изменений (dry-run)
 harness apply             # применить (идемпотентно)
+harness update            # обновить зеркала источников и применить
 harness doctor            # проверки состояния (опционально --live)
 ```
 
@@ -51,6 +52,26 @@ sources:
 repo-источники клонируются (shallow) в `~/.local/share/harness/mirrors/<id>`.
 Перед клоном ищется существующий клон с тем же remote (например ручной clone в
 `~/.config/opencode/skills/*`) и переиспользуется.
+
+## Pin версий скиллов
+
+Скилл можно зафиксировать на тег/ветку/sha — источник «плавает» только тогда,
+когда это нужно:
+
+```yaml
+skills:
+  - source: android-skills
+    name: navigation-3
+    ref: v1.1.0        # тег, ветка или sha
+    mode: vendor
+```
+
+- каждый ref живёт в отдельном зеркале `<id>@<ref>-<hash>`: проекты с разными
+  пинами не перетирают друг друга;
+- в state пишется и запрошенный `pin`, и фактический sha;
+- `harness update` обновляет незапиненные скиллы до HEAD, а запиненные
+  перечитывает по ref; изменения проходят через обычный план;
+- `ref` работает только для `repo`-источников; для local это ошибка.
 
 ## Инструкции (AGENTS.md)
 

@@ -284,7 +284,17 @@ function sortItems(a: PlanItem, b: PlanItem): number {
   )
 }
 
-type SkillDescriptor = { installName: string; sourceDir: string; sourceRef: string; entry: { name: string; source: string; mode?: SkillMode } }
+type SkillDescriptor = {
+  installName: string
+  sourceDir: string
+  sourceRef: string
+  entry: { name: string; source: string; ref?: string; mode?: SkillMode }
+}
+
+/** Отображение источника с пином: `android-skills@v1.1.0`. */
+function skillOrigin(skill: SkillDescriptor): string {
+  return skill.entry.ref === undefined ? skill.entry.source : `${skill.entry.source}@${skill.entry.ref}`
+}
 
 async function assessSkill(
   mode: SkillMode,
@@ -302,7 +312,7 @@ async function assessSkill(
         kind: "skill",
         action: "create",
         target,
-        detail: `vendor ← ${skill.entry.source}`,
+        detail: `vendor ← ${skillOrigin(skill)}`,
         warn: recorded !== undefined ? "артефакт удалён — будет восстановлен" : undefined,
       }
     }
@@ -314,7 +324,7 @@ async function assessSkill(
       kind: "skill",
       action: "update",
       target,
-      detail: `vendor ← ${skill.entry.source}`,
+      detail: `vendor ← ${skillOrigin(skill)}`,
       warn: userEdited ? "правился вручную — будет заменён из источника" : undefined,
     }
   }
