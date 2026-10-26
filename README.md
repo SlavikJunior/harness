@@ -19,6 +19,23 @@ harness update            # обновить зеркала источников
 harness doctor            # проверки состояния (опционально --live)
 ```
 
+## CI
+
+```bash
+harness plan --json       # план в JSON: items, summary, drift, conflicts, blocked?, secrets
+harness doctor --strict   # exit 1 при ошибках и при предупреждениях
+```
+
+- `plan --json` не печатает ANSI; детали уже замаскированы, `secrets` содержит
+  только путь и причину — значения не выводятся никогда;
+- заблокированный план (`blocked`) — exit 1 и в JSON, и в человеческом режиме;
+- `doctor` возвращает 1 при ошибках всегда, `--strict` добавляет к этому warn
+  (удобно как гейт в CI). `doctor --json` печатает тот же набор проверок.
+
+```bash
+harness plan --json > plan.json && harness doctor --strict
+```
+
 ## Что чем управляет
 
 | Артефакт | Механика |
