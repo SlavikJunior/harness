@@ -19,6 +19,7 @@ const sourcesFileSchema = z
 const DEFAULT_SOURCES: Record<string, SourceDef> = {
   "android-skills": { type: "repo", url: "https://github.com/android/skills.git" },
   alexgladkov: { type: "repo", url: "https://github.com/AlexGladkov/skills.git" },
+  "gradle-skills": { type: "repo", url: "https://github.com/gradle/gradle-skills.git" },
 }
 
 export function sourcesFile(): string {

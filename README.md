@@ -37,7 +37,8 @@ harness doctor            # проверки состояния (опциона�
 ## Источники скиллов
 
 Дефолтные: `android-skills` (github.com/android/skills), `alexgladkov`
-(github.com/AlexGladkov/skills). Свои — в `~/.config/harness/sources.yaml`:
+(github.com/AlexGladkov/skills), `gradle-skills` (github.com/gradle/gradle-skills).
+Свои — в `~/.config/harness/sources.yaml`:
 
 ```yaml
 sources:
@@ -71,7 +72,9 @@ skills:
 - в state пишется и запрошенный `pin`, и фактический sha;
 - `harness update` обновляет незапиненные скиллы до HEAD, а запиненные
   перечитывает по ref; изменения проходят через обычный план;
-- `ref` работает только для `repo`-источников; для local это ошибка.
+- `ref` работает только для `repo`-источников; для local это ошибка;
+- если у репозитория нет тегов (например `gradle-skills`), пинить можно по
+  ветке или sha коммита.
 
 ## Инструкции (AGENTS.md)
 
