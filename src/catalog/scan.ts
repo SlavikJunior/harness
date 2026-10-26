@@ -27,7 +27,8 @@ export interface SkillFrontmatter {
 
 /** Разбор frontmatter SKILL.md: блок между первой парой `---`. */
 export function parseFrontmatter(text: string): SkillFrontmatter {
-  const lines = text.split("\n")
+  /* Windows: git с core.autocrlf=true отдаёт скиллы с CRLF — режем оба варианта */
+  const lines = text.split(/\r?\n/)
   if (lines[0]?.trim() !== "---") return { name: undefined, description: undefined }
   const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---")
   if (end === -1) return { name: undefined, description: undefined }

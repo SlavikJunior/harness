@@ -9,6 +9,12 @@ describe("parseFrontmatter", () => {
     expect(parsed.description).toBe("Тестовый скилл")
   })
 
+  it("читает frontmatter с CRLF (git core.autocrlf на Windows)", () => {
+    const parsed = parseFrontmatter("---\r\nname: demo\r\ndescription: v1\r\n---\r\n# Тело\r\n")
+    expect(parsed.name).toBe("demo")
+    expect(parsed.description).toBe("v1")
+  })
+
   it("битый frontmatter не роняет парсер", () => {
     expect(parseFrontmatter("---\nname: [не, closed\n---\n")).toEqual({ name: undefined, description: undefined })
   })
