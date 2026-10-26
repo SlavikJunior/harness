@@ -43,6 +43,12 @@ export interface HarnessState {
   skills: Record<string, StateSkill>
   /** управляемые блоки инструкций */
   instructions: StateInstructions
+  /** записанный массив permissions: sha(value) — порядок правил значим */
+  permissions?: StatePermissions
+}
+
+export interface StatePermissions {
+  sha: string
 }
 
 export function emptyState(): HarnessState {
@@ -100,6 +106,8 @@ const stateSchema = z.object({
   instructions: z
     .object({ file: z.string(), blocks: z.record(z.string(), z.string()) })
     .optional(),
+  /* optional: state-файлы, созданные до появления permissions */
+  permissions: z.object({ sha: z.string().min(1) }).optional(),
 })
 
 /** Хеш директории (для vendor-скиллов). */

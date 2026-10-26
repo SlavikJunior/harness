@@ -1,4 +1,4 @@
-import type { SkillEntry, SkillMode, MCPServer } from "../manifest/schema.js"
+import type { SkillEntry, SkillMode, MCPServer, PermissionRule } from "../manifest/schema.js"
 import type { SkillItem } from "../catalog/types.js"
 import type { InstructionBlock } from "./instructions.js"
 
@@ -28,12 +28,14 @@ export interface DesiredState {
   mcpServers: Record<string, MCPServer>
   skills: DesiredSkill[]
   instructions: DesiredInstructions
+  /** V2 permissions; undefined — секции в манифесте нет (не управляем) */
+  permissions?: PermissionRule[]
 }
 
 export type PlanAction = "create" | "update" | "remove" | "unchanged"
 
 export interface PlanItem {
-  kind: "skill" | "mcp" | "instructions" | "config"
+  kind: "skill" | "mcp" | "permissions" | "instructions" | "config"
   action: PlanAction
   /** читаемое имя цели, например `navigation-3`, `mcp:gradle`, `config:model` */
   target: string

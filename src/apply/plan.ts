@@ -5,7 +5,7 @@ import { deepEqual, stableStringify } from "../core/hash.js"
 import { sha256 } from "../core/fs.js"
 import { isDirectory, readText, sha256Dir } from "../core/fs.js"
 import { MANAGED_CONFIG_FILE } from "../manifest/file.js"
-import type { SkillMode } from "../manifest/schema.js"
+import type { PermissionRule, SkillMode } from "../manifest/schema.js"
 import { validateJsoncText } from "./config.js"
 import { skillTargetDir } from "./desired.js"
 import type { DesiredState } from "./types.js"
@@ -93,6 +93,9 @@ export async function computePlan(
     }
   }
 
+  /* Permissions (V2): отдельный массив, порядок правил значим */
+  assessPermissions(fileExists ? valueAt(text, ["permissions"]) : undefined, desired, state, items, drift)
+
   /* Инструкции (AGENTS.md): управляемые блоки */
   const instructionsBlocked = await assessInstructions(projectRoot, desired, state, items, drift)
   if (instructionsBlocked !== undefined) {
@@ -166,6 +169,83 @@ export async function computePlan(
   await scanConflicts(projectRoot, desired, conflicts)
 
   return { items: items.toSorted(sortItems), drift, conflicts }
+}
+
+/** Русский счётчик правил: 1 правило, 2 правила, 5 правил. */
+function permissionsLabel(count: number): string {
+  const mod10 = count % 10
+  const mod100 = count % 100
+  const word =
+    mod10 === 1 && mod100 !== 11
+      ? "правило"
+      : mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)
+        ? "правила"
+        : "правил"
+  return `${count} ${word}`
+}
+
+/** Что именно изменилось: количество или только порядок (порядок в V2 значим). */
+function describePermissionsChange(current: unknown, desired: readonly PermissionRule[]): string {
+  if (!Array.isArray(current)) return permissionsLabel(desired.length)
+  if (current.length !== desired.length) return `правил ${current.length} → ${desired.length}`
+  const signature = (rules: readonly unknown[]): string => rules.map((rule) => stableStringify(rule)).toSorted().join("\n")
+  if (signature(current) === signature(desired)) return "порядок правил изменён"
+  return `правил ${current.length} → ${desired.length}`
+}
+
+/**
+ * Permissions V2: массив правил одним ключом. Порядок значим (побеждает
+ * последнее совпадение), поэтому сравнение — глубокое и упорядоченное.
+ * Чужие правила без записи в state не удаляются: ownership только свой.
+ */
+function assessPermissions(
+  current: unknown,
+  desired: DesiredState,
+  state: HarnessState,
+  items: PlanItem[],
+  drift: string[],
+): void {
+  const target = "permissions"
+  const recorded = state.permissions?.sha
+
+  if (desired.permissions === undefined) {
+    if (recorded !== undefined) {
+      items.push({ kind: "permissions", action: "remove", target, detail: "убран из манифеста" })
+    }
+    return
+  }
+
+  const rules = desired.permissions
+  if (current === undefined) {
+    items.push({
+      kind: "permissions",
+      action: "create",
+      target,
+      detail: permissionsLabel(rules.length),
+      warn: recorded !== undefined ? "правила удалены — будут восстановлены" : undefined,
+    })
+    if (recorded !== undefined) drift.push(`${target}: правила удалены из конфига, будут восстановлены`)
+    return
+  }
+  if (deepEqual(current, rules)) {
+    items.push({ kind: "permissions", action: "unchanged", target })
+    return
+  }
+
+  const userEdited = recorded !== undefined && sha256(stableStringify(current)) !== recorded
+  items.push({
+    kind: "permissions",
+    action: "update",
+    target,
+    detail: describePermissionsChange(current, rules),
+    warn:
+      recorded === undefined
+        ? "в конфиге уже были permissions вне harness — будут заменены"
+        : userEdited
+          ? "правился вне harness"
+          : undefined,
+  })
+  if (userEdited) drift.push(`${target}: правился вне harness, apply перезапишет правила`)
 }
 
 /**
@@ -275,7 +355,7 @@ function stringifyShort(value: unknown): string {
 }
 
 function sortItems(a: PlanItem, b: PlanItem): number {
-  const kindOrder: Record<PlanItem["kind"], number> = { skill: 0, mcp: 1, instructions: 2, config: 3 }
+  const kindOrder: Record<PlanItem["kind"], number> = { skill: 0, mcp: 1, permissions: 2, instructions: 3, config: 4 }
   const actionOrder: Record<PlanAction, number> = { create: 0, update: 1, remove: 2, unchanged: 3 }
   return (
     kindOrder[a.kind] - kindOrder[b.kind] ||

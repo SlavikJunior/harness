@@ -8,6 +8,8 @@ import { computePlan } from "../apply/plan.js"
 import { loadState } from "../apply/state.js"
 import { validateJsoncText } from "../apply/config.js"
 import { scanManifest } from "../secrets/scan.js"
+import { lintPermissions } from "./permissions.js"
+import { permissionsSchema } from "../manifest/schema.js"
 import {
   extractInstructionPaths,
   instructionsFilePath,
@@ -23,6 +25,19 @@ export type CheckLevel = "ok" | "warn" | "error"
 export interface DoctorCheck {
   level: CheckLevel
   message: string
+}
+
+/** Значение JSONC по пути (для проверки фактического конфига). */
+function valueAt(jsoncText: string, jsonPath: JSONPath): unknown {
+  const tree = parseTree(jsoncText)
+  if (tree === undefined) return undefined
+  const node = findNodeAtLocation(tree, jsonPath)
+  if (node === undefined) return undefined
+  try {
+    return JSON.parse(jsoncText.slice(node.offset, node.offset + node.length))
+  } catch {
+    return undefined
+  }
 }
 
 export async function runDoctor(projectRoot: string, options: { live?: boolean } = {}): Promise<DoctorCheck[]> {
@@ -54,7 +69,8 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
   /* Каталог + разрешение скиллов */
   let desired
   try {
-    const catalog = await buildCatalog({ refs: catalogRefs(manifest) })
+    const refs = catalogRefs(manifest)
+    const catalog = await buildCatalog({ refs, sourceFilter: Object.keys(refs) })
     desired = buildDesiredState(projectRoot, manifest, catalog)
     if (desired.skills.length > 0) {
       push("ok", `скиллы разрешены: ${desired.skills.map((skill) => skill.installName).join(", ")}`)
@@ -90,7 +106,27 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
       if (schemaNode === undefined) {
         push("warn", "нет $schema — добавится при следующем harness apply")
       }
+      /* Форма фактического массива: ручная правка managed-файла не должна проходить молча */
+      const actualPermissions = valueAt(text, ["permissions"])
+      if (actualPermissions !== undefined) {
+        const parsedRules = permissionsSchema.safeParse(actualPermissions)
+        if (!parsedRules.success) {
+          const issue = parsedRules.error.issues[0]
+          const where = issue !== undefined && issue.path.length > 0 ? `[${issue.path.join(".")}]` : ""
+          push("error", `permissions${where}: ${issue?.message ?? "некорректное правило"}`)
+        }
+      }
     }
+  }
+
+  /* Permissions: линты манифеста (V2 по умолчанию разрешает всё) */
+  if (desired.permissions !== undefined) {
+    if (desired.permissions.length === 0) {
+      push("ok", "permissions: пустой список — правила V2 не переопределяются")
+    } else {
+      push("ok", `permissions: задано правил — ${desired.permissions.length}`)
+    }
+    for (const lint of lintPermissions(desired.permissions)) push("warn", lint.message)
   }
 
   /* Бинарники локальных MCP-серверов */

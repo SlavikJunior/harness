@@ -17,7 +17,12 @@ export const applyCommand = new Command("apply")
   .action(async (options: { dryRun?: boolean; refresh?: boolean }) => {
     const projectRoot = process.cwd()
     const manifest = await loadManifest(projectRoot)
-    const catalog = await buildCatalog({ refresh: options.refresh, refs: catalogRefs(manifest) })
+    const refs = catalogRefs(manifest)
+    const catalog = await buildCatalog({
+      refresh: options.refresh,
+      refs,
+      sourceFilter: Object.keys(refs),
+    })
     const desired = buildDesiredState(projectRoot, manifest, catalog)
     const state = await loadState(projectRoot)
     const plan = await computePlan(projectRoot, desired, state)

@@ -56,6 +56,7 @@ async function buildNextState(desired: DesiredState): Promise<HarnessState> {
   }
   for (const [key, value] of Object.entries(desired.config)) state.configKeys[key] = hashValue(value)
   for (const [name, server] of Object.entries(desired.mcpServers)) state.mcp[name] = hashValue(server)
+  if (desired.permissions !== undefined) state.permissions = { sha: hashValue(desired.permissions) }
   for (const skill of desired.skills) {
     const mode: SkillMode = skill.entry.mode ?? "vendor"
     const record: StateSkill = {
@@ -105,6 +106,14 @@ export async function applyDesired(
       configChanged = editor.remove(["mcp", "servers", item.target.slice("mcp:".length)]) || configChanged
     }
   }
+
+  /* Permissions: ключом владеем только если он пришёл из манифеста или записан в state */
+  if (desired.permissions !== undefined) {
+    configChanged = editor.set(["permissions"], desired.permissions) || configChanged
+  } else if (state.permissions !== undefined) {
+    configChanged = editor.remove(["permissions"]) || configChanged
+  }
+
   if (configChanged) await writeTextAtomic(managedFile, `${editor.currentText.trimEnd()}\n`)
 
   /* Инструкции: только управляемые блоки, пользовательский текст не трогается */

@@ -47,6 +47,26 @@ export type MCPServer = z.infer<typeof mcpServerSchema>
 
 const mcpNameSchema = z.string().regex(/^[a-zA-Z0-9_.-]+$/, "имя сервера: буквы, цифры, _ . -")
 
+/**
+ * Правило V2: `permissions: [{ action, resource, effect }]`.
+ * Порядок значим (последнее совпадение побеждает), поэтому массив не сортируется.
+ */
+export const permissionEffectSchema = z.enum(["allow", "ask", "deny"])
+export type PermissionEffect = z.infer<typeof permissionEffectSchema>
+
+export const permissionRuleSchema = z
+  .object({
+    /** действие инструмента: read, edit, shell, webfetch, external_directory, <server>_<tool> … */
+    action: z.string().min(1).regex(/^\S+$/, "action не должен содержать пробелов"),
+    /** ресурс: путь, команда, URL, id скилла; `*` и `?` — wildcard */
+    resource: z.string().min(1),
+    effect: permissionEffectSchema,
+  })
+  .strict()
+export type PermissionRule = z.infer<typeof permissionRuleSchema>
+
+export const permissionsSchema = z.array(permissionRuleSchema)
+
 /** Имя управляемого блока в AGENTS.md: входит в маркер `<!-- harness:begin:NAME -->`. */
 export const instructionBlockNameSchema = z
   .string()
@@ -86,6 +106,8 @@ export const manifestSchema = z
     mcp: z.record(mcpNameSchema, mcpServerSchema).optional(),
     /** управляемые блоки AGENTS.md (или другого файла инструкций) */
     instructions: instructionsSchema.optional(),
+    /** правила V2 для .opencode/opencode.jsonc → top-level `permissions` */
+    permissions: permissionsSchema.optional(),
     /** passthrough: значения пишутся как top-level поля .opencode/opencode.jsonc */
     config: z.record(z.string(), z.unknown()).optional(),
   })

@@ -132,6 +132,7 @@ export function buildDesiredState(
         ([name, content]): InstructionBlock => ({ name, content }),
       ),
     },
+    ...(manifest.permissions === undefined ? {} : { permissions: manifest.permissions }),
   }
 }
 
