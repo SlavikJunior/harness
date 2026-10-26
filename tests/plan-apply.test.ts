@@ -8,6 +8,7 @@ import { applyDesired } from "../src/apply/apply.js"
 import { emptyState, loadState } from "../src/apply/state.js"
 import { validateManifestText } from "../src/manifest/load.js"
 import { validateJsoncText } from "../src/apply/config.js"
+import { sameLinkTarget } from "../src/apply/link.js"
 import { MANAGED_CONFIG_FILE } from "../src/manifest/file.js"
 import { tempDir, writeFixture, isolateXdg } from "./helpers.js"
 
@@ -97,7 +98,8 @@ describe("plan/apply e2e", () => {
     expect(vendored).toContain("Demo skill")
     const linkStat = await fs.lstat(path.join(project, ".opencode", "skills", "demo2"))
     expect(linkStat.isSymbolicLink()).toBe(true)
-    expect(await fs.readlink(path.join(project, ".opencode", "skills", "demo2"))).toBe(path.join(sourceDir, "demo2"))
+    const linkTarget = await fs.readlink(path.join(project, ".opencode", "skills", "demo2"))
+    expect(sameLinkTarget(linkTarget, path.join(project, ".opencode", "skills", "demo2"), path.join(sourceDir, "demo2"))).toBe(true)
 
     /* Конфиг */
     const configText = await fs.readFile(MANAGED_CONFIG_FILE(project), "utf8")

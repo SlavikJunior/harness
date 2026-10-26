@@ -22,7 +22,16 @@ function line(item: { action: string; target: string; detail?: string; warn?: st
   return `  ${glyph} ${target}${detail}${warn}`
 }
 
-export function printPlanReport(report: PlanReport, secrets: SecretFinding[] = []): void {
+export interface PlanPrintOptions {
+  /** подсказка внизу отчёта: у plan и update следующий шаг разный */
+  footer?: string
+}
+
+export function printPlanReport(
+  report: PlanReport,
+  secrets: SecretFinding[] = [],
+  options: PlanPrintOptions = {},
+): void {
   console.log("")
   console.log(pc.bold("План изменений"))
   const changed = report.items.filter((item) => item.action !== "unchanged")
@@ -49,7 +58,9 @@ export function printPlanReport(report: PlanReport, secrets: SecretFinding[] = [
   }
   printSecretFindings(secrets)
   console.log("")
-  console.log(pc.dim("  Применить: harness apply  ·  dry-run: harness plan  ·  проверка: harness doctor"))
+  console.log(
+    pc.dim(options.footer ?? "  Применить: harness apply  ·  dry-run: harness plan  ·  проверка: harness doctor"),
+  )
 }
 
 /** Плейнтекст-секреты в манифесте: значения не печатаются — только путь и причина. */

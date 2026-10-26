@@ -34,7 +34,9 @@ export const updateCommand = new Command("update")
       process.exitCode = 1
       return
     }
-    printPlanReport(plan, scanManifest(manifest))
+    printPlanReport(plan, scanManifest(manifest), {
+      footer: "  Применить: harness update  ·  dry-run: harness update --dry-run  ·  проверка: harness doctor",
+    })
 
     const outcome = await applyDesired(projectRoot, desired, plan, state, { dryRun: options.dryRun })
     printApplyOutcome(outcome)

@@ -6,6 +6,18 @@ CLI для декларативной настройки OpenCode-харнесс
 описывается одним YAML-файлом, а инструмент приводит проект к этому состоянию
 идемпотентно: `plan` показывает diff, `apply` применяет, `doctor` проверяет.
 
+## Установка
+
+```bash
+git clone https://github.com/SlavikJunior/harness.git
+cd harness
+npm install
+npm run build
+npm link            # глобальная команда `harness`
+```
+
+Требуется Node.js ≥ 20. Без `npm link` — `node dist/cli/index.js <команда>`.
+
 ## Workflow
 
 ```bash
