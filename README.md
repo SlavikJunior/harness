@@ -32,6 +32,7 @@ harness apply             # применить (идемпотентно)
 harness apply --undo      # откатить последний apply
 harness update            # обновить зеркала источников и применить
 harness update --watch    # следить за upstream и применять изменения
+harness codex export      # перенести харнесс в Codex (односторонне)
 harness doctor            # проверки состояния (опционально --live)
 harness doctor --fix      # безопасные автоисправления
 ```
@@ -120,6 +121,63 @@ harness update --watch --interval 300   # секунды, по умолчани�
 - local-источники опрашиваются хешем директории; запиненные 40-символьные
   SHA неизменяемы и сеть для них не нужна.
 
+## Codex export
+
+`harness codex export` — односторонний перенос OpenCode-харнесса в Codex.
+Источник правды остаётся `harness.yaml` + фактические артефакты OpenCode;
+Codex-файлы только генерируются. OpenCode при этом не меняется.
+
+```bash
+harness codex export                    # project-scope
+harness codex export --global           # ~/.codex и ~/.agents/skills
+harness codex export --all              # project + global
+harness codex export --dry-run          # только отчёт
+harness codex export --json             # машиночитаемо
+harness codex export --strict           # exit 1 при approximate/skipped/conflict
+harness codex export --force            # перезаписать чужое/изменённое (с backup)
+harness codex export --manifest-only    # не добавлять live-only артефакты OpenCode
+harness codex undo [--global|--all]     # откатить последний export
+```
+
+| Что | Куда |
+|---|---|
+| MCP | `.codex/config.toml` (project) / `$CODEX_HOME/config.toml` (global) |
+| Агенты | `.codex/agents/<name>.toml` / `$CODEX_HOME/agents/` |
+| Скиллы | `.agents/skills/<name>` / `~/.agents/skills/<name>` |
+| Инструкции проекта | общий `AGENTS.md` (managed-блоки) |
+| Глобальные инструкции | `$CODEX_HOME/AGENTS.md` |
+| State / бэкапы | `.harness/codex-state.json` / `~/.config/harness/` |
+
+`CODEX_HOME` учитывается (по умолчанию `~/.codex`). Пользовательские скиллы
+Codex всё равно живут в `~/.agents/skills` — это отдельный путь.
+
+- скиллы: `vendor` копируется, `reference` становится symlink (на Windows —
+  junction с fallback в копию);
+- MCP: local `command[]` → `command` + `args`; `{env:VAR}` → `env_vars`;
+  remote `Bearer {env:VAR}` → `bearer_token_env_var`, остальные env-заголовки →
+  `env_http_headers`, статические → `http_headers`;
+- агенты: `developer_instructions` из body; `mode`, `permissions` и
+  OpenCode-модель не переносятся — это видно в отчёте;
+- инструкции: managed-блоки с маркерами, пользовательский текст вне блоков
+  сохраняется; если Codex-файла ещё нет, допускается полная копия;
+- live-only скиллы/агенты/MCP из фактического `.opencode` добавляются по
+  умолчанию (с пометкой `approximate`); `--manifest-only` отключает это.
+
+**Не переносится автоматически:** `permissions`/`policies`, `config.*`
+(модели, провайдеры, theme, keybinds, formatter, LSP, plugins), OpenCode
+plugin-система. Эти пункты попадают в отчёт как `skipped`/`approximate`.
+
+Владение и безопасность:
+- без state harness не перезаписывает чужие `.codex`/`.agents` файлы:
+  конфликт → `conflict` и пропуск, запись только с `--force`;
+- перед записью снимается снапшот `backups-codex/` (последние 5); `codex undo`
+  расходует снапшот;
+- литеральные секреты, `{file:...}` и смешанные `{env:...}`-значения не
+  копируются — сервер/агент/блок пропускается с предупреждением;
+- Codex загружает project `.codex/config.toml` только для trusted-проекта;
+  `AGENTS.override.md` перекрывает managed-блоки `AGENTS.md`; лимит инструкций
+  Codex — 32 KiB (всё это попадает в предупреждения).
+
 ## CI
 
 ```bash
@@ -146,6 +204,9 @@ harness plan --json > plan.json && harness doctor --strict
 
 `harness doctor --fix --json` отдаёт `{ autoFix: { fixed, skipped }, checks }`.
 Если `skipped` непустой (ручные правки/чужие ключи), код выхода — 1.
+
+`harness codex export --json` отдаёт `{ results: [{ scope, items, written, removed, backupDir?, errors }] }`.
+Значения секретов в отчёт не попадают.
 
 В `watch`-режиме `--json` печатает NDJSON: по одной строке на цикл с
 изменениями (`{ at, firstCycle, changed, plan, applied, dryRun }`).
@@ -274,7 +335,8 @@ harness --global doctor
 - `init --global` не детектит стек текущего каталога — черновик пустой;
 - тот же флаг работает для новых команд: `harness --global diff`,
   `harness --global apply --undo`, `harness --global doctor --fix`,
-  `harness --global update --watch`, `harness --global mcp add`.
+  `harness --global update --watch`, `harness --global mcp add`,
+  `harness --global codex export`, `harness --global codex undo`.
 
 ## Источники скиллов
 
@@ -420,3 +482,8 @@ npm run build           # tsc → dist/
 - `apply --undo` — локальный стек на 5 снапшотов; манифест не откатывается
 - `mcpb`/`nuget` из реестра требуют ручной настройки: автоматический маппинг
   поддержан для `npm`, `pypi`, `oci`, `cargo` и `remotes`
+- Codex export не переносит permissions/policies/config/model: Codex использует
+  другую модель sandbox/approval и другие ID моделей — это осознанно остаётся
+  ручной настройкой
+- Codex-файлы генерируются односторонне; правки в Codex ловятся как drift и
+  требуют `--force`, обратный импорт в OpenCode не выполняется

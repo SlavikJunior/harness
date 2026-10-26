@@ -75,3 +75,15 @@ export {
   type ScopeKind,
 } from "./scope.js"
 export { MANAGED_CONFIG_FILE, MANIFEST_FILE, OPENCODE_CONFIG_DIR } from "./manifest/file.js"
+
+export { exportCodex, type CodexExportOptions } from "./targets/codex/export.js"
+export { codexPaths, resolveCodexHome, displayCodexPath } from "./targets/codex/paths.js"
+export { restoreCodexBackup, listCodexBackups } from "./targets/codex/backup.js"
+export { parseTomlText, applyMcpChanges, renderMcpTable, renderAgentToml } from "./targets/codex/toml.js"
+export type {
+  CodexDesired,
+  CodexExportResult,
+  CodexItem,
+  CodexState,
+  CodexStatus,
+} from "./targets/codex/types.js"

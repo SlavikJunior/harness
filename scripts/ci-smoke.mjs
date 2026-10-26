@@ -277,6 +277,28 @@ config:
     await new Promise((resolve) => registryStub.close(resolve))
   }
 
+  /* Codex export: project-scope, без CODEX_HOME и без записи в реальный ~ */
+  const codexResult = JSON.parse(run(project, ["codex", "export", "--json"], 0))
+  const codexReport = codexResult.results[0]
+  if (codexReport.errors.length > 0) {
+    throw new Error(`codex export: ${codexReport.errors.join("; ")}`)
+  }
+  const codexConfig = await fs.readFile(path.join(project, ".codex", "config.toml"), "utf8")
+  if (!codexConfig.includes("[mcp_servers.ci-local-mcp]")) {
+    throw new Error("codex export не перенёс MCP")
+  }
+  if (!existsSync(path.join(project, ".codex", "agents", "reviewer.toml"))) {
+    throw new Error("codex export не перенёс агента")
+  }
+  if (!existsSync(path.join(project, ".agents", "skills", "demo", "SKILL.md"))) {
+    throw new Error("codex export не перенёс скилл")
+  }
+  /* permissions/policies/config не переносятся — strict обязан упасть */
+  run(project, ["codex", "export", "--strict", "--json"], 1)
+  run(project, ["codex", "undo"], 0)
+  if (existsSync(path.join(project, ".codex", "config.toml"))) {
+    throw new Error("codex undo не удалил сгенерированный config")
+  }
 
   /* Глобальный скоуп: init → apply → doctor в изолированном XDG */
   const globalProject = path.join(temp, "global-project")

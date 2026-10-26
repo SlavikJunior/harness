@@ -10,6 +10,7 @@ import { updateCommand } from "./update.js"
 import { doctorCommand } from "./doctor.js"
 import { addCommand } from "./add.js"
 import { mcpCommand } from "./mcp.js"
+import { codexCommand } from "./codex.js"
 import { skillsCommand } from "./skills.js"
 import { sourcesCommand } from "./sources.js"
 
@@ -30,6 +31,7 @@ program.addCommand(updateCommand)
 program.addCommand(doctorCommand)
 program.addCommand(addCommand)
 program.addCommand(mcpCommand)
+program.addCommand(codexCommand)
 program.addCommand(skillsCommand)
 program.addCommand(sourcesCommand)
 
