@@ -87,6 +87,12 @@ config:
   if (changed !== 0) throw new Error(`повторный план не пуст: ${JSON.stringify(secondPlan.summary)}`)
   if (secondPlan.drift.length !== 0) throw new Error(`drift после apply: ${secondPlan.drift.join("; ")}`)
 
+  /* update --json: зеркала локальные, обновлять нечего */
+  const updateReport = JSON.parse(run(project, ["update", "--json", "--dry-run"], 0))
+  if (updateReport.dryRun !== true) throw new Error("update --json не отметил dry-run")
+  if (updateReport.applied.length !== 0) throw new Error("update --json применил пункты в dry-run")
+  if (updateReport.plan.drift.length !== 0) throw new Error("update --json видит drift")
+
   /* Артефакты */
   const linkPath = path.join(project, ".opencode", "skills", "demo")
   const linkStat = await fs.lstat(linkPath)

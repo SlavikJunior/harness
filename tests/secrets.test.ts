@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { scanManifest, classifyValue, maskSecrets, maskText } from "../src/secrets/scan.js"
+import { scanManifest, classifyValue, maskSecrets, maskText, looksHighEntropy, shannonEntropy } from "../src/secrets/scan.js"
 import type { Manifest } from "../src/manifest/schema.js"
 
 /** Аудит плейнтекст-секретов: детекция, пропуск ссылок и отсутствие утечки значения. */
@@ -127,6 +127,49 @@ describe("scanManifest: негативы", () => {
       config: { model: "anthropic/claude-sonnet-5-5", theme: "dark" },
     })
     expect(scanManifest(manifest)).toEqual([])
+  })
+})
+
+describe("scanManifest: высокая энтропия", () => {
+  const unknownToken = "aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW"
+
+  it("находит токен без известного префикса", () => {
+    const manifest = manifestOf({
+      mcp: { custom: { type: "remote", url: "https://example.com/mcp", headers: { "X-Key": unknownToken } } },
+    })
+    expect(scanManifest(manifest)[0]).toMatchObject({ path: "mcp.custom.headers.X-Key", kind: "entropy" })
+  })
+
+  it("не флагает пути, kebab-case, git sha и UUID", () => {
+    const values = [
+      "packages/docs/getting-started-with-tokens.mdx",
+      "eslint-plugin-react-hooks-2024",
+      "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+      "123e4567-e89b-12d3-a456-426614174000",
+      "anthropic/claude-sonnet-5-5",
+      "https://example.com/mcp",
+    ]
+    for (const value of values) expect(classifyValue(undefined, value), value).toBeUndefined()
+  })
+
+  it("порог энтропии и требования к составу строки", () => {
+    expect(shannonEntropy("aaaa")).toBe(0)
+    expect(shannonEntropy("abcd")).toBe(2)
+    expect(looksHighEntropy(unknownToken)).toBe(true)
+    expect(looksHighEntropy("shortToken1")).toBe(false)
+    expect(looksHighEntropy(unknownToken.toLowerCase())).toBe(false)
+    expect(looksHighEntropy(unknownToken.replace(/\d/g, "x"))).toBe(false)
+  })
+
+  it("секретное имя ключа важнее энтропии (одна находка)", () => {
+    const manifest = manifestOf({ config: { apiKey: unknownToken } })
+    const findings = scanManifest(manifest)
+    expect(findings).toHaveLength(1)
+    expect(findings[0]?.kind).toBe("keyword")
+  })
+
+  it("маскирует токен без известного префикса", () => {
+    expect(maskText(unknownToken, "X-Key")).toBe("•••")
   })
 })
 

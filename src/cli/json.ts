@@ -47,8 +47,14 @@ export function planReportJson(
   }
 }
 
-/** Код выхода plan: заблокированный план — ошибка (apply всё равно не пройдёт). */
-export function planExitCode(report: PlanReport): 0 | 1 {
+/** Отчёт `harness update --json`: план обновления + реально применённые пункты. */
+export interface UpdateJsonReport {
+  plan: PlanJsonReport
+  applied: PlanReport["items"]
+  dryRun: boolean
+}
+
+/** Код выхода plan: заблокированный план — ошибка (apply всё равно не пройдёт). */export function planExitCode(report: PlanReport): 0 | 1 {
   return report.blocked === undefined ? 0 : 1
 }
 

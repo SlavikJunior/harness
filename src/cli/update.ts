@@ -7,6 +7,7 @@ import { applyDesired } from "../apply/apply.js"
 import { loadState } from "../apply/state.js"
 import { scanManifest } from "../secrets/scan.js"
 import { printApplyOutcome, printPlanReport } from "./print.js"
+import { planReportJson, type UpdateJsonReport } from "./json.js"
 import { fail, ok } from "../core/log.js"
 
 /**
@@ -20,7 +21,8 @@ import { fail, ok } from "../core/log.js"
 export const updateCommand = new Command("update")
   .description("Обновить зеркала скиллов и применить изменения (apply --refresh)")
   .option("--dry-run", "показать план обновления, ничего не менять")
-  .action(async (options: { dryRun?: boolean }) => {
+  .option("--json", "вывести отчёт обновления в формате JSON")
+  .action(async (options: { dryRun?: boolean; json?: boolean }) => {
     const projectRoot = process.cwd()
     const manifest = await loadManifest(projectRoot)
     const refs = catalogRefs(manifest)
@@ -30,15 +32,35 @@ export const updateCommand = new Command("update")
     const plan = await computePlan(projectRoot, desired, state)
 
     if (plan.blocked !== undefined) {
-      fail("Обновление заблокировано", plan.blocked)
+      if (options.json === true) {
+        const blockedReport: UpdateJsonReport = {
+          plan: planReportJson(plan, scanManifest(manifest)),
+          applied: [],
+          dryRun: options.dryRun === true,
+        }
+        console.log(JSON.stringify(blockedReport, null, 2))
+      } else {
+        fail("Обновление заблокировано", plan.blocked)
+      }
       process.exitCode = 1
       return
     }
-    printPlanReport(plan, scanManifest(manifest), {
-      footer: "  Применить: harness update  ·  dry-run: harness update --dry-run  ·  проверка: harness doctor",
-    })
+    if (options.json !== true) {
+      printPlanReport(plan, scanManifest(manifest), {
+        footer: "  Применить: harness update  ·  dry-run: harness update --dry-run  ·  проверка: harness doctor",
+      })
+    }
 
     const outcome = await applyDesired(projectRoot, desired, plan, state, { dryRun: options.dryRun })
+    if (options.json === true) {
+      const report: UpdateJsonReport = {
+        plan: planReportJson(plan, scanManifest(manifest)),
+        applied: outcome.applied,
+        dryRun: outcome.dryRun,
+      }
+      console.log(JSON.stringify(report, null, 2))
+      return
+    }
     printApplyOutcome(outcome)
     if (outcome.dryRun) ok("Это был dry-run. Реальное обновление: harness update")
   })

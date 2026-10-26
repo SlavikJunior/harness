@@ -13,7 +13,7 @@ import type { Manifest } from "../manifest/schema.js"
  * и причина, иначе аудит сам утекал бы в логи CI.
  */
 
-export type SecretKind = "pattern" | "url-credentials" | "auth-header" | "keyword"
+export type SecretKind = "pattern" | "url-credentials" | "auth-header" | "keyword" | "entropy"
 
 export interface SecretFinding {
   /** dot-path поля манифеста, например `mcp.playwright.headers.Authorization` */
@@ -92,6 +92,39 @@ function isPlaceholder(value: string): boolean {
   return PLACEHOLDER_RE.test(value.trim())
 }
 
+/** Энтропия Шеннона в битах на символ: случайный токен заметно плотнее текста. */
+export function shannonEntropy(value: string): number {
+  if (value === "") return 0
+  const counts = new Map<string, number>()
+  for (const char of value) counts.set(char, (counts.get(char) ?? 0) + 1)
+  let bits = 0
+  for (const count of counts.values()) {
+    const probability = count / value.length
+    bits -= probability * Math.log2(probability)
+  }
+  return bits
+}
+
+/** Символы токенов: base64url/hex без разделителей путей и схем. */
+const ENTROPY_CHARSET_RE = /^[A-Za-z0-9_+=-]+$/
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const HEX_RE = /^[0-9a-f]+$/i
+/** Публичные хеши (git sha, sha256) — высокая энтропия, но не секрет. */
+const PUBLIC_HEX_LENGTHS = new Set([32, 40, 64])
+
+/**
+ * Токен без известного префикса: длинная строка в base64url/hex-алфавите
+ * с высокой энтропией и смешанным регистром. Требование смешанного регистра
+ * и цифры отсекает kebab-case имена, пути, версии и обычные слова.
+ */
+export function looksHighEntropy(value: string): boolean {
+  if (value.length < 24 || value.length > 512) return false
+  if (!ENTROPY_CHARSET_RE.test(value) || UUID_RE.test(value)) return false
+  if (!/[a-z]/.test(value) || !/[A-Z]/.test(value) || !/\d/.test(value)) return false
+  if (HEX_RE.test(value) && PUBLIC_HEX_LENGTHS.has(value.length)) return false
+  return shannonEntropy(value) >= 3.6
+}
+
 interface Classification {
   kind: SecretKind
   reason: string
@@ -112,6 +145,9 @@ export function classifyValue(key: string | undefined, value: string): Classific
   }
   if (looksLikeSecretKey(key)) {
     return { kind: "keyword", reason: "имя поля указывает на секрет, значение в плейнтексте" }
+  }
+  if (looksHighEntropy(value)) {
+    return { kind: "entropy", reason: "высокая энтропия строки — похоже на токен без известного префикса" }
   }
   return undefined
 }
