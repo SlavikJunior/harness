@@ -7,6 +7,7 @@ import { buildDesiredState } from "../apply/desired.js"
 import { computePlan } from "../apply/plan.js"
 import { loadState } from "../apply/state.js"
 import { validateJsoncText } from "../apply/config.js"
+import { scanManifest } from "../secrets/scan.js"
 import { findNodeAtLocation, parseTree, type JSONPath } from "jsonc-parser"
 
 /** `harness doctor`: фактическое состояние проекта против манифеста. */
@@ -33,6 +34,16 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
     return checks
   }
   push("ok", `манифест валиден (version: ${manifest.version})`)
+
+  /* Плейнтекст-секреты: манифест коммитится — значения не печатаем */
+  const secrets = scanManifest(manifest)
+  if (secrets.length === 0) {
+    push("ok", "плейнтекст-секретов в манифесте нет")
+  } else {
+    for (const finding of secrets) {
+      push("warn", `секрет: ${finding.path} — ${finding.reason} (замени на {env:VAR})`)
+    }
+  }
 
   /* Каталог + разрешение скиллов */
   let desired

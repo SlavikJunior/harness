@@ -168,6 +168,35 @@ describe("plan/apply e2e", () => {
     expect(await fs.lstat(path.join(project, ".opencode", "skills", "demo"))).toBeTruthy()
   })
 
+  it("план не печатает плейнтекст-секреты (маскировка)", async () => {
+    const { project } = await setupProject()
+    const configSecret = "sk-proj-AbCdEfGhIjKlMnOp1234"
+    const commandSecret = `ghp_${"a".repeat(36)}`
+    await fs.writeFile(
+      path.join(project, "harness.yaml"),
+      `version: 1
+mcp:
+  leak:
+    type: local
+    command: [srv, --token, ${commandSecret}]
+  remote:
+    type: remote
+    url: "https://user:pa55w0rd@db.example.com/mcp"
+config:
+  apiKey: ${configSecret}
+`,
+      "utf8",
+    )
+    const manifest = validateManifestText(await fs.readFile(path.join(project, "harness.yaml"), "utf8"))
+    const desired = buildDesiredState(project, manifest, await buildCatalog({ sourceFilter: ["test-local"] }))
+    const plan = await computePlan(project, desired, emptyState())
+    const serialized = JSON.stringify(plan.items)
+    expect(serialized).not.toContain(configSecret)
+    expect(serialized).not.toContain(commandSecret)
+    expect(serialized).not.toContain("pa55w0rd")
+    expect(serialized).toContain("•••")
+  })
+
   it("конфликт passthrough с прямым конфигом пользователя виден в плане", async () => {
     const { project } = await setupProject()
     await writeFixture(project, "opencode.json", '{ "model": "user/model" }\n')

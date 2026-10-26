@@ -3,7 +3,10 @@ import { parseDocument, type Document, type YAMLSeq } from "yaml"
 import { HarnessError } from "../core/errors.js"
 import { readText, writeTextAtomic } from "../core/fs.js"
 import { MANIFEST_PATH, validateManifestText } from "../manifest/load.js"
+import type { Manifest } from "../manifest/schema.js"
+import { scanManifest } from "../secrets/scan.js"
 import { ok, fail } from "../core/log.js"
+import { printSecretFindings } from "./print.js"
 
 /** `harness add skill|mcp`: точечные правки манифеста (комментарии сохраняются). */
 
@@ -20,7 +23,7 @@ function parseKv(pairs: string[] | undefined, separator: string, what: string): 
   return result
 }
 
-async function editManifest(projectRoot: string, edit: (doc: Document) => void): Promise<void> {
+async function editManifest(projectRoot: string, edit: (doc: Document) => void): Promise<Manifest> {
   const file = MANIFEST_PATH(projectRoot)
   const text = await readText(file)
   if (text === undefined) {
@@ -36,8 +39,9 @@ async function editManifest(projectRoot: string, edit: (doc: Document) => void):
     }
   }
   const nextText = doc.toString()
-  validateManifestText(nextText) // защита от поломки манифеста своей же правкой
+  const manifest = validateManifestText(nextText) // защита от поломки манифеста своей же правкой
   await writeTextAtomic(file, nextText)
+  return manifest
 }
 
 export const addCommand = new Command("add")
@@ -65,7 +69,7 @@ addCommand
     const entry: Record<string, string> = options.mode === "reference" ? { source, name, mode: "reference" } : { source, name }
 
     try {
-      await editManifest(process.cwd(), (doc: Document) => {
+      const manifest = await editManifest(process.cwd(), (doc: Document) => {
         const existing = doc.get("skills")
         if (existing !== undefined && existing !== null) {
           // дубликат — идемпотентность add
@@ -82,6 +86,7 @@ addCommand
         }
       })
       ok(`Добавлен скилл: ${reference}`)
+      printSecretFindings(scanManifest(manifest))
     } catch (error) {
       fail(error instanceof Error ? error.message : String(error))
       process.exitCode = 1
@@ -120,10 +125,11 @@ addCommand
           ? { type: "local", command, ...(Object.keys(environment).length > 0 ? { environment } : {}) }
           : { type: "remote", url: options.url, ...(Object.keys(headers).length > 0 ? { headers } : {}) }
 
-      await editManifest(process.cwd(), (doc) => {
+      const manifest = await editManifest(process.cwd(), (doc) => {
         doc.setIn(["mcp", name], doc.createNode(value))
       })
       ok(`Добавлен MCP-сервер: ${name}`)
+      printSecretFindings(scanManifest(manifest))
     } catch (error) {
       fail(error instanceof Error ? error.message : String(error))
       process.exitCode = 1

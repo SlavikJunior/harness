@@ -4,6 +4,7 @@ import { buildCatalog } from "../catalog/index.js"
 import { buildDesiredState } from "../apply/desired.js"
 import { computePlan } from "../apply/plan.js"
 import { loadState } from "../apply/state.js"
+import { scanManifest } from "../secrets/scan.js"
 import { printPlanReport } from "./print.js"
 import { fail } from "../core/log.js"
 
@@ -23,5 +24,5 @@ export const planCommand = new Command("plan")
       process.exitCode = 1
       return
     }
-    printPlanReport(plan)
+    printPlanReport(plan, scanManifest(manifest))
   })

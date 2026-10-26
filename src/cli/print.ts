@@ -2,6 +2,7 @@ import pc from "picocolors"
 import type { PlanReport } from "../apply/types.js"
 import type { ApplyOutcome } from "../apply/apply.js"
 import type { DoctorCheck } from "../verify/doctor.js"
+import type { SecretFinding } from "../secrets/scan.js"
 
 /** Печать отчётов CLI. Чистые функции поверх console. */
 
@@ -21,7 +22,7 @@ function line(item: { action: string; target: string; detail?: string; warn?: st
   return `  ${glyph} ${target}${detail}${warn}`
 }
 
-export function printPlanReport(report: PlanReport): void {
+export function printPlanReport(report: PlanReport, secrets: SecretFinding[] = []): void {
   console.log("")
   console.log(pc.bold("План изменений"))
   const changed = report.items.filter((item) => item.action !== "unchanged")
@@ -46,8 +47,20 @@ export function printPlanReport(report: PlanReport): void {
     console.log(pc.bold("Перекрытия пользовательских конфигов"))
     for (const entry of report.conflicts) console.log(`  ${pc.yellow("⚠")} ${entry}`)
   }
+  printSecretFindings(secrets)
   console.log("")
   console.log(pc.dim("  Применить: harness apply  ·  dry-run: harness plan  ·  проверка: harness doctor"))
+}
+
+/** Плейнтекст-секреты в манифесте: значения не печатаются — только путь и причина. */
+export function printSecretFindings(findings: SecretFinding[]): void {
+  if (findings.length === 0) return
+  console.log("")
+  console.log(pc.bold("Секреты в манифесте — не коммить плейнтекст"))
+  for (const finding of findings) {
+    console.log(`  ${pc.yellow("⚠")} ${finding.path} ${pc.dim(`— ${finding.reason}`)}`)
+  }
+  console.log(pc.dim("  → вынеси значение в env и используй {env:VAR}: V2 подставляет его до парсинга конфига"))
 }
 
 export function printApplyOutcome(outcome: ApplyOutcome): void {

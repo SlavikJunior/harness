@@ -57,6 +57,32 @@ repo-источники клонируются (shallow) в `~/.local/share/harn
 конфиг-ключей, MCP-серверов, содержимого vendor-скиллов. На этом строятся
 идемпотентность apply и детекция drift-а (файл правили вне harness).
 
+## Секреты
+
+Манифест коммитится в git, поэтому плейнтекст-секреты в нём — утечка. `plan`,
+`doctor` и `add` предупреждают, если находят:
+
+- известные форматы токенов (`sk-…`, `ghp_…`, `AKIA…`, JWT, `AIza…`, …)
+- `user:pass@host` в URL
+- `Bearer`/`Basic` в заголовке `Authorization`
+- значения под ключами вида `apiKey`, `TOKEN`, `dbPassword`
+
+Правильная форма — ссылка на окружение:
+
+```yaml
+mcp:
+  api:
+    type: remote
+    url: https://example.com/mcp
+    headers:
+      Authorization: "Bearer {env:MCP_TOKEN}"
+```
+
+OpenCode V2 подставляет `{env:VAR}` и `{file:path}` в текст конфига до
+парсинга (`packages/core/src/config/variable.ts`), так что значение живёт
+только в окружении. Сами значения найденных секретов в вывод не попадают —
+только путь и причина.
+
 ## Разработка
 
 ```bash
@@ -72,4 +98,5 @@ npm run build           # tsc → dist/
 - Только project-scope (глобальный конфиг не управляется)
 - `permissions`/`instructions` — вне MVP (манифест расширяем)
 - Symlink в reference-режиме: POSIX; на Windows требуется dev-режим
-- Секреты: используй `{env:VAR}` в значениях MCP; аудит плейнтекст-секретов — в backlog
+- Секреты: аудит — только предупреждения (без блокировки apply); проверка на
+  энтропию строк не делается — только известные форматы, URL и имена ключей

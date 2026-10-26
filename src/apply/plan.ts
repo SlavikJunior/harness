@@ -11,6 +11,7 @@ import { skillTargetDir } from "./desired.js"
 import type { DesiredState } from "./types.js"
 import type { HarnessState, StateSkill } from "./state.js"
 import type { PlanAction, PlanItem, PlanReport } from "./types.js"
+import { maskSecrets, maskText } from "../secrets/scan.js"
 
 /** Diff текущего состояния проекта против желаемого → PlanReport. */
 
@@ -62,7 +63,7 @@ export async function computePlan(
   for (const [key, value] of desiredPassthrough) {
     const target = `config:${key}`
     if (!fileExists) {
-      items.push({ kind: "config", action: "create", target, detail: stringifyShort(value) })
+      items.push({ kind: "config", action: "create", target, detail: stringifyShort(maskSecrets(value, key)) })
       continue
     }
     const current = valueAt(text, [key])
@@ -75,7 +76,7 @@ export async function computePlan(
         kind: "config",
         action: "update",
         target,
-        detail: `→ ${stringifyShort(value)}`,
+        detail: `→ ${stringifyShort(maskSecrets(value, key))}`,
         warn: userEdited ? "правился вне harness" : undefined,
       })
       if (userEdited) drift.push(`${target}: правился вне harness, apply перезапишет значение`)
@@ -157,7 +158,9 @@ export async function computePlan(
 }
 
 function describeServer(server: { type: string; command?: string[]; url?: string }): string {
-  return server.type === "local" ? `local: ${(server.command ?? []).join(" ")}` : `remote: ${server.url ?? ""}`
+  return server.type === "local"
+    ? `local: ${(server.command ?? []).map((argument) => maskText(argument)).join(" ")}`
+    : `remote: ${maskText(server.url ?? "", "url")}`
 }
 
 function stringifyShort(value: unknown): string {
