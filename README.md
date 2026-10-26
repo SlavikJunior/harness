@@ -25,11 +25,100 @@ harness init              # черновик harness.yaml по детекции 
 harness skills list       # каталог скиллов из всех источников
 harness add skill android-skills/navigation-3        # добавить скилл в манифест
 harness add mcp playwright --local bunx @playwright/mcp
+harness mcp search filesystem                        # каталог MCP Registry
+harness diff              # подробный diff: значения и файлы
 harness plan              # предпросмотр изменений (dry-run)
 harness apply             # применить (идемпотентно)
+harness apply --undo      # откатить последний apply
 harness update            # обновить зеркала источников и применить
+harness update --watch    # следить за upstream и применять изменения
 harness doctor            # проверки состояния (опционально --live)
+harness doctor --fix      # безопасные автоисправления
 ```
+
+## Diff, снапшоты и откат
+
+`harness plan` отвечает «что изменится», `harness diff` — «как именно»:
+
+```bash
+harness diff              # значения конфига/MCP, файлы скиллов, агенты, блоки
+harness diff --json       # машиночитаемо (значения уже замаскированы)
+```
+
+- конфиг и MCP показываются как JSON-diff «текущее → манифест»;
+- vendor-скиллы — файловый diff (`+` появится, `−` исчезнет, `~` изменится);
+- агенты и блоки инструкций — построчный diff;
+- секреты маскируются (`•••`) — diff можно прикладывать к issue и гонять в CI.
+
+Перед каждой записью `apply` снимает снапшот только изменяемых артефактов
+(конфиг, скиллы, агенты, инструкции, `.gitignore`, state) в
+`.harness/backups/<время>/` (глобально — `~/.config/harness/backups/`).
+Хранятся последние 5.
+
+```bash
+harness apply --undo --dry-run   # что будет восстановлено
+harness apply --undo             # откатить последний apply
+```
+
+- откат — стек: после успешного `--undo` снапшот расходуется, следующий
+  `--undo` вернёт ещё более раннее состояние;
+- манифест не откатывается: после отката `harness plan` честно покажет
+  расхождение между манифестом и артефактами;
+- откат не читает манифест — работает, даже если YAML сломан.
+
+## Автоисправление (`doctor --fix`)
+
+`doctor --fix` применяет только безопасные расхождения: создаёт отсутствующие
+артефакты (скилл, агент, блок, MCP, ключ конфига) и убирает то, чем harness
+владеет по state. Всё, что похоже на ручную правку (`update` с предупреждением)
+или на чужой ключ конфига, не трогается — для этого нужен осознанный
+`harness apply`.
+Если что-то осталось неисправленным, команда завершается с кодом 1.
+
+```bash
+harness doctor --fix           # исправить безопасное и показать проверки
+harness doctor --fix --json    # { autoFix, checks }
+```
+
+## MCP-каталог
+
+`harness mcp search|add` работают с официальным MCP Registry (API v0.1):
+
+```bash
+harness mcp search playwright --limit 10
+harness mcp search filesystem --json --refresh
+harness mcp add io.github.user/server --name my-server
+harness mcp add io.github.user/server --package npm --version 1.2.3
+harness mcp add io.github.user/server --remote --dry-run
+```
+
+- каталог **не устанавливает и не применяет** сервер сам: результат — запись
+  в `harness.yaml`, дальше обычный `plan → apply`;
+- по умолчанию выбирается remote, если он есть; иначе первый поддерживаемый
+  пакет (`npm → pypi → oci → cargo`). `--remote`/`--package` задают явно;
+- версия пакета фиксируется в команде (`pkg@1.2.3`, `pkg==1.2.3`, тег OCI);
+  `mcpb`/`nuget` автоматически не поддерживаются — честная ошибка;
+- секреты из реестра (`isSecret`, значения с токенами) превращаются в
+  `{env:VAR}`; значения не печатаются и не пишутся. Требуемые переменные
+  перечисляются в выводе;
+- кэш — `$XDG_DATA_HOME/harness/registry`, TTL 24 часа, `--refresh` игнорирует;
+  при недоступной сети используется stale-кэш с предупреждением;
+- для тестов и внутренних зеркал endpoint переопределяется `HARNESS_REGISTRY_URL`;
+- реестр не проверяет безопасность кода: перед `mcp add` смотри репозиторий
+  и требования; `plan` покажет, что именно попадёт в конфиг.
+
+## Watch-режим
+
+```bash
+harness update --watch --interval 300   # секунды, по умолчанию 300
+```
+
+- опрашивает upstream через `git ls-remote` (дёшево, без скачивания объектов);
+- при изменении SHA делает обычный `update` (fetch/pull → plan → apply);
+- `--json` печатает NDJSON: одна строка на цикл с изменениями;
+- ошибка источника не останавливает цикл; Ctrl+C — корректная остановка;
+- local-источники опрашиваются хешем директории; запиненные 40-символьные
+  SHA неизменяемы и сеть для них не нужна.
 
 ## CI
 
@@ -50,6 +139,16 @@ harness plan --json > plan.json && harness doctor --strict
 
 `harness update --json [--dry-run]` отдаёт `{ plan, applied, dryRun }`: план
 обновления зеркал и фактически применённые пункты, без ANSI.
+
+`harness diff --json` отдаёт `{ entries, blocked? }`, где `entries[]` —
+`{ kind, target, action, detail?, lines[], note? }`. Значения уже
+замаскированы, поэтому отчёт безопасно публиковать как артефакт CI.
+
+`harness doctor --fix --json` отдаёт `{ autoFix: { fixed, skipped }, checks }`.
+Если `skipped` непустой (ручные правки/чужие ключи), код выхода — 1.
+
+В `watch`-режиме `--json` печатает NDJSON: по одной строке на цикл с
+изменениями (`{ at, firstCycle, changed, plan, applied, dryRun }`).
 
 ## Что чем управляет
 
@@ -172,7 +271,10 @@ harness --global doctor
   `ask`/`deny` из проекта не отменить — `doctor` об этом предупреждает;
 - `.gitignore` и проверки конфликтов проектных конфигов к глобальному скоупу
   не применяются;
-- `init --global` не детектит стек текущего каталога — черновик пустой.
+- `init --global` не детектит стек текущего каталога — черновик пустой;
+- тот же флаг работает для новых команд: `harness --global diff`,
+  `harness --global apply --undo`, `harness --global doctor --fix`,
+  `harness --global update --watch`, `harness --global mcp add`.
 
 ## Источники скиллов
 
@@ -254,6 +356,9 @@ instructions:
 массивов `permissions`/`policies` и markdown-агентов. На этом строятся
 идемпотентность apply и детекция drift-а (файл правили вне harness).
 
+Рядом лежат снапшоты для `apply --undo` (`.harness/backups/`, последние 5).
+Они тоже игнорируются git — это локальная страховка, а не артефакт проекта.
+
 ## Секреты
 
 Манифест коммитится в git, поэтому плейнтекст-секреты в нём — утечка. `plan`,
@@ -307,5 +412,11 @@ npm run build           # tsc → dist/
 - Секреты: аудит — только предупреждения (без блокировки apply); энтропийная
   эвристика намеренно консервативна и не видит токены без смешанного регистра
   (например, lowercase base32)
-- MCP-серверы задаются вручную; каталог официального MCP Registry исследован,
-  но не реализован — см. `swarm-report/mcp-catalog-2026-10-26.md`
+- MCP-серверы можно задать вручную или взять из официального MCP Registry
+  (`harness mcp search|add`); каталог не устанавливает серверы сам и не
+  гарантирует безопасность кода — provenance проверяет пользователь
+- `diff` для vendor-скиллов показывает уровень файлов, а не построчный diff
+  каждого файла (для больших скиллов это осознанно)
+- `apply --undo` — локальный стек на 5 снапшотов; манифест не откатывается
+- `mcpb`/`nuget` из реестра требуют ручной настройки: автоматический маппинг
+  поддержан для `npm`, `pypi`, `oci`, `cargo` и `remotes`

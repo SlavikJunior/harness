@@ -15,6 +15,7 @@ import {
 } from "./instructions.js"
 import { createReferenceLink } from "./link.js"
 import { agentFilePath } from "./agents.js"
+import { createBackup } from "./backup.js"
 import { displayPath, scopeFrom, type ScopeInput } from "../scope.js"
 
 /** Исполнение плана: приводит проект к DesiredState (идемпотентно). */
@@ -25,6 +26,8 @@ export interface ApplyOutcome {
   dryRun: boolean
   /** путь state-файла для сообщения (проект — относительный, global — `~/…`) */
   stateFile: string
+  /** путь снапшота для отката (`apply --undo`) */
+  backupDir?: string
 }
 
 const GITIGNORE_LINE = ".harness/"
@@ -99,6 +102,9 @@ export async function applyDesired(
     return { applied: plan.items.filter((item) => item.action !== "unchanged"), dryRun: true, stateFile }
   }
 
+  /* Снапшот — до первой записи: откат должен вернуть ровно то, что было */
+  const backupDir = await createBackup(scope, desired, plan, state)
+
   /* Конфиг: $schema + passthrough + mcp.servers */
   const managedFile = MANAGED_CONFIG_FILE(scope)
   const editor = ConfigEditor.from(await readText(managedFile))
@@ -157,8 +163,12 @@ export async function applyDesired(
     if (rendered.changed) await writeTextAtomic(instructionsFile, rendered.text)
   }
 
-  /* Скиллы: установка из манифеста */
+  /* Скиллы: переписываем только изменённые планом (а не все при каждом apply) */
+  const changedSkills = new Set(
+    plan.items.filter((item) => item.kind === "skill" && item.action !== "unchanged").map((item) => item.target),
+  )
   for (const skill of desired.skills) {
+    if (!changedSkills.has(`skill:${skill.installName}`)) continue
     const targetDir = skillTargetDir(scope, skill)
     if ((skill.entry.mode ?? "vendor") === "reference") {
       await fs.mkdir(path.dirname(targetDir), { recursive: true })
@@ -194,5 +204,10 @@ export async function applyDesired(
   if (scope.kind === "project") await ensureGitignore(scope.root)
   await saveState(scope, await buildNextState(desired))
 
-  return { applied: plan.items.filter((item) => item.action !== "unchanged"), dryRun: false, stateFile }
+  return {
+    applied: plan.items.filter((item) => item.action !== "unchanged"),
+    dryRun: false,
+    stateFile,
+    ...(backupDir === undefined ? {} : { backupDir: displayPath(scope, backupDir) }),
+  }
 }

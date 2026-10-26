@@ -1,15 +1,12 @@
 import { Command } from "commander"
-import { loadManifest } from "../manifest/load.js"
-import { buildCatalog } from "../catalog/index.js"
-import { buildDesiredState, catalogRefs } from "../apply/desired.js"
-import { computePlan } from "../apply/plan.js"
+import { loadContext } from "../apply/context.js"
 import { applyDesired } from "../apply/apply.js"
-import { loadState } from "../apply/state.js"
 import { scanManifest } from "../secrets/scan.js"
 import { printApplyOutcome, printPlanReport } from "./print.js"
 import { planReportJson, type UpdateJsonReport } from "./json.js"
-import { fail, ok } from "../core/log.js"
-import { resolveScope } from "../scope.js"
+import { fail, info, ok } from "../core/log.js"
+import { resolveScope, type Scope } from "../scope.js"
+import { watchUpdates } from "./watch.js"
 
 /**
  * `harness update`: обновить зеркала источников и применить изменения.
@@ -19,54 +16,34 @@ import { resolveScope } from "../scope.js"
  * план: видно, что именно поменяется, и ничего не пишется при --dry-run.
  */
 
-export const updateCommand = new Command("update")
-  .description("Обновить зеркала скиллов и применить изменения (apply --refresh)")
-  .option("--dry-run", "показать план обновления, ничего не менять")
-  .option("--json", "вывести отчёт обновления в формате JSON")
-  .option("--global", "глобальный скоуп: ~/.config/opencode и ~/.config/harness")
-  .action(async (options: { dryRun?: boolean; json?: boolean; global?: boolean }, command: Command) => {
-    const scope = await resolveScope(process.cwd(), { global: command.optsWithGlobals().global === true })
-    const manifest = await loadManifest(scope)
-    const refs = catalogRefs(manifest)
-    const catalog = await buildCatalog({ refresh: true, refs, sourceFilter: Object.keys(refs) })
-    const desired = buildDesiredState(scope, manifest, catalog)
-    const state = await loadState(scope)
-    const plan = await computePlan(scope, desired, state)
+export interface UpdateOptions {
+  dryRun?: boolean
+  json?: boolean
+}
 
-    if (plan.blocked !== undefined) {
-      if (options.json === true) {
-        const blockedReport: UpdateJsonReport = {
-          plan: planReportJson(plan, scanManifest(manifest)),
-          applied: [],
-          dryRun: options.dryRun === true,
-        }
-        console.log(JSON.stringify(blockedReport, null, 2))
-      } else {
-        fail("Обновление заблокировано", plan.blocked)
-      }
-      process.exitCode = 1
-      return
-    }
-    if (options.json !== true) {
-      printPlanReport(plan, scanManifest(manifest), {
-        footer:
-          scope.kind === "global"
-            ? "  Глобальный скоуп · применить: harness --global update · проверка: harness --global doctor"
-            : "  Применить: harness update  ·  dry-run: harness update --dry-run  ·  проверка: harness doctor",
-      })
-    }
+export async function updateOnce(scope: Scope, options: UpdateOptions): Promise<UpdateJsonReport> {
+  const { manifest, desired, state, plan } = await loadContext(scope, { refresh: true })
 
-    const outcome = await applyDesired(scope, desired, plan, state, { dryRun: options.dryRun })
-    if (options.json === true) {
-      const report: UpdateJsonReport = {
-        plan: planReportJson(plan, scanManifest(manifest)),
-        applied: outcome.applied,
-        dryRun: outcome.dryRun,
-      }
-      console.log(JSON.stringify(report, null, 2))
-      return
+  if (options.json !== true) {
+    printPlanReport(plan, scanManifest(manifest), {
+      footer:
+        scope.kind === "global"
+          ? "  Глобальный скоуп · применить: harness --global update · проверка: harness --global doctor"
+          : "  Применить: harness update  ·  dry-run: harness update --dry-run  ·  проверка: harness doctor",
+    })
+  }
+
+  if (plan.blocked !== undefined) {
+    return {
+      plan: planReportJson(plan, scanManifest(manifest)),
+      applied: [],
+      dryRun: options.dryRun === true,
     }
-    printApplyOutcome(outcome)
+  }
+
+  const outcome = await applyDesired(scope, desired, plan, state, { dryRun: options.dryRun })
+  if (options.json !== true) {
+    printApplyOutcome(outcome, { global: scope.kind === "global" })
     if (outcome.dryRun) {
       ok(
         `Это был dry-run. Реальное обновление: ${
@@ -74,4 +51,63 @@ export const updateCommand = new Command("update")
         }`,
       )
     }
-  })
+  }
+  return {
+    plan: planReportJson(plan, scanManifest(manifest)),
+    applied: outcome.applied,
+    dryRun: outcome.dryRun,
+  }
+}
+
+export const updateCommand = new Command("update")
+  .description("Обновить зеркала скиллов и применить изменения (apply --refresh)")
+  .option("--dry-run", "показать план обновления, ничего не менять")
+  .option("--json", "вывести отчёт обновления в формате JSON")
+  .option("--watch", "следить за upstream и обновлять при изменениях (Ctrl+C — стоп)")
+  .option("--interval <seconds>", "интервал опроса в watch-режиме", "300")
+  .option("--global", "глобальный скоуп: ~/.config/opencode и ~/.config/harness")
+  .action(
+    async (
+      options: { dryRun?: boolean; json?: boolean; watch?: boolean; interval?: string; global?: boolean },
+      command: Command,
+    ) => {
+      const scope = await resolveScope(process.cwd(), { global: command.optsWithGlobals().global === true })
+
+      if (options.watch === true) {
+        const seconds = Number(options.interval)
+        if (!Number.isInteger(seconds) || seconds <= 0) {
+          fail(`--interval: ожидалось положительное целое число секунд, получено "${options.interval}"`)
+          process.exitCode = 1
+          return
+        }
+        const controller = new AbortController()
+        const stop = (): void => {
+          info("watch: остановка…")
+          controller.abort()
+        }
+        process.once("SIGINT", stop)
+        try {
+          await watchUpdates(scope, {
+            intervalMs: seconds * 1000,
+            json: options.json === true,
+            dryRun: options.dryRun,
+            signal: controller.signal,
+          })
+        } finally {
+          process.removeListener("SIGINT", stop)
+        }
+        return
+      }
+
+      const report = await updateOnce(scope, { dryRun: options.dryRun, json: options.json })
+      if (options.json === true) {
+        console.log(JSON.stringify(report, null, 2))
+        if (report.plan.blocked !== undefined) process.exitCode = 1
+        return
+      }
+      if (report.plan.blocked !== undefined) {
+        fail("Обновление заблокировано", report.plan.blocked)
+        process.exitCode = 1
+      }
+    },
+  )

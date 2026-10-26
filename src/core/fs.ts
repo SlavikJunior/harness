@@ -62,6 +62,7 @@ export function sha256(data: string | Buffer): string {
  * и отсутствующая считаются разными (префикс).
  */
 export async function sha256Dir(dir: string): Promise<string> {
+  if (!(await isDirectory(dir))) return sha256("missing|")
   const parts: string[] = []
   const walk = async (current: string, rel: string): Promise<void> => {
     const entries = await fs.readdir(current, { withFileTypes: true }).catch(() => [])
@@ -76,7 +77,7 @@ export async function sha256Dir(dir: string): Promise<string> {
     }
   }
   await walk(dir, "")
-  return sha256(`${dir === undefined ? "missing" : "present"}|${parts.join("|")}`)
+  return sha256(`present|${parts.join("|")}`)
 }
 
 /** Рекурсивное удаление директории, если существует. */

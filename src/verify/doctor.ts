@@ -6,7 +6,7 @@ import { buildCatalog } from "../catalog/index.js"
 import { buildDesiredState, catalogRefs } from "../apply/desired.js"
 import { computePlan } from "../apply/plan.js"
 import { loadState } from "../apply/state.js"
-import { validateJsoncText } from "../apply/config.js"
+import { validateJsoncText, valueAt } from "../apply/config.js"
 import { scanManifest } from "../secrets/scan.js"
 import { lintPermissions } from "./permissions.js"
 import { lintPolicies } from "./policies.js"
@@ -27,19 +27,6 @@ export type CheckLevel = "ok" | "warn" | "error"
 export interface DoctorCheck {
   level: CheckLevel
   message: string
-}
-
-/** Значение JSONC по пути (для проверки фактического конфига). */
-function valueAt(jsoncText: string, jsonPath: JSONPath): unknown {
-  const tree = parseTree(jsoncText)
-  if (tree === undefined) return undefined
-  const node = findNodeAtLocation(tree, jsonPath)
-  if (node === undefined) return undefined
-  try {
-    return JSON.parse(jsoncText.slice(node.offset, node.offset + node.length))
-  } catch {
-    return undefined
-  }
 }
 
 export async function runDoctor(input: ScopeInput, options: { live?: boolean } = {}): Promise<DoctorCheck[]> {

@@ -5,9 +5,10 @@
  * (на Windows — junction), permissions и управляемый блок AGENTS.md.
  */
 import { existsSync, promises as fs } from "node:fs"
+import { createServer } from "node:http"
 import os from "node:os"
 import path from "node:path"
-import { spawnSync } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -34,6 +35,29 @@ function run(project, args, expectedStatus) {
     )
   }
   return result.stdout
+}
+
+/** Асинхронный запуск: нужен, когда в этом же процессе работает HTTP-stub. */
+function runAsync(project, args, expectedStatus) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [cli, ...args], { cwd: project, env: process.env })
+    let stdout = ""
+    let stderr = ""
+    child.stdout.on("data", (chunk) => (stdout += chunk))
+    child.stderr.on("data", (chunk) => (stderr += chunk))
+    child.on("error", reject)
+    child.on("close", (code) => {
+      if (code === expectedStatus) {
+        resolve(stdout)
+        return
+      }
+      reject(
+        new Error(
+          `harness ${args.join(" ")}: код ${code}, ожидался ${expectedStatus}\n${stdout}\n${stderr}`,
+        ),
+      )
+    })
+  })
 }
 
 try {
@@ -101,6 +125,49 @@ config:
   if (changed !== 0) throw new Error(`повторный план не пуст: ${JSON.stringify(secondPlan.summary)}`)
   if (secondPlan.drift.length !== 0) throw new Error(`drift после apply: ${secondPlan.drift.join("; ")}`)
 
+  /* diff --json: расхождений нет */
+  const emptyDiff = JSON.parse(run(project, ["diff", "--json"], 0))
+  if (emptyDiff.entries.length !== 0) {
+    throw new Error(`diff после apply не пуст: ${JSON.stringify(emptyDiff.entries.map((entry) => entry.target))}`)
+  }
+
+  /* doctor --fix: удалённый агент восстанавливается, strict снова зелёный */
+  const agentPath = path.join(project, ".opencode", "agents", "reviewer.md")
+  await fs.rm(agentPath)
+  run(project, ["doctor", "--strict"], 1)
+  const fixed = JSON.parse(run(project, ["doctor", "--fix", "--json"], 0))
+  if (fixed.autoFix.skipped.length !== 0) {
+    throw new Error(`doctor --fix отказался чинить: ${fixed.autoFix.skipped.join("; ")}`)
+  }
+  if (!fixed.autoFix.fixed.some((item) => item.target === "agent:reviewer")) {
+    throw new Error("doctor --fix не восстановил агента")
+  }
+  if (!existsSync(agentPath)) throw new Error("файл агента не восстановлен")
+  run(project, ["doctor", "--strict"], 0)
+
+  /* diff и откат: правка конфига видна, --undo возвращает прежнее значение */
+  const manifestPath = path.join(project, "harness.yaml")
+  const manifestText = await fs.readFile(manifestPath, "utf8")
+  await fs.writeFile(manifestPath, manifestText.replace("test/model", "test/model2"), "utf8")
+
+  const changedDiff = JSON.parse(run(project, ["diff", "--json"], 0))
+  const configDiff = changedDiff.entries.find((entry) => entry.target === "config:model")
+  if (configDiff === undefined) throw new Error("diff не увидел изменение config:model")
+  if (!configDiff.lines.some((line) => line.type === "add" && line.text.includes("test/model2"))) {
+    throw new Error("diff не содержит нового значения config:model")
+  }
+
+  run(project, ["apply"], 0)
+  const configFile = path.join(project, ".opencode", "opencode.jsonc")
+  const configAfterChange = JSON.parse(await fs.readFile(configFile, "utf8"))
+  if (configAfterChange.model !== "test/model2") throw new Error("изменение модели не применено")
+
+  run(project, ["apply", "--undo"], 0)
+  const restoredConfig = JSON.parse(await fs.readFile(configFile, "utf8"))
+  if (restoredConfig.model !== "test/model") throw new Error("apply --undo не вернул конфиг")
+  await fs.writeFile(manifestPath, manifestText, "utf8")
+  run(project, ["apply"], 0)
+
   /* update --json: зеркала локальные, обновлять нечего */
   const updateReport = JSON.parse(run(project, ["update", "--json", "--dry-run"], 0))
   if (updateReport.dryRun !== true) throw new Error("update --json не отметил dry-run")
@@ -127,6 +194,89 @@ config:
 
   const agents = await fs.readFile(path.join(project, "AGENTS.md"), "utf8")
   if (!agents.includes("<!-- harness:begin:ci -->")) throw new Error("блок AGENTS.md не создан")
+
+  /* MCP-каталог: локальный stub реестра — без сети и без реальных установок */
+  const registryEntry = {
+    server: {
+      name: "io.example/ci-demo",
+      description: "CI demo MCP",
+      version: "1.2.3",
+      packages: [
+        {
+          registryType: "npm",
+          identifier: "ci-demo",
+          version: "1.2.3",
+          runtimeArguments: [{ type: "positional", value: "-y" }],
+          environmentVariables: [{ name: "CI_TOKEN", isRequired: true, isSecret: true }],
+        },
+      ],
+    },
+    _meta: { "io.modelcontextprotocol.registry/official": { status: "active", isLatest: true } },
+  }
+  const registryStub = createServer((request, response) => {
+    const url = request.url ?? ""
+    if (url.startsWith("/v0.1/servers/") && url.includes("/versions/latest")) {
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(JSON.stringify(registryEntry))
+      return
+    }
+    if (url.startsWith("/v0.1/servers?")) {
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(JSON.stringify({ servers: [registryEntry], metadata: { nextCursor: null } }))
+      return
+    }
+    response.writeHead(404, { "content-type": "application/json" })
+    response.end("{}")
+  })
+  await new Promise((resolve) => registryStub.listen(0, "127.0.0.1", resolve))
+  const registryAddress = registryStub.address()
+  if (registryAddress === null || typeof registryAddress === "string") {
+    throw new Error("не удалось поднять stub MCP Registry")
+  }
+  process.env.HARNESS_REGISTRY_URL = `http://127.0.0.1:${registryAddress.port}`
+  try {
+    const registryProject = path.join(temp, "registry-project")
+    await write(path.join(registryProject, "harness.yaml"), "version: 1\nmcp: {}\n")
+
+    const found = JSON.parse(
+      await runAsync(registryProject, ["mcp", "search", "ci-demo", "--json", "--refresh"], 0),
+    )
+    if (found.servers.length !== 1 || found.servers[0].name !== "io.example/ci-demo") {
+      throw new Error(`mcp search вернул не то: ${JSON.stringify(found.servers)}`)
+    }
+
+    await runAsync(
+      registryProject,
+      ["mcp", "add", "io.example/ci-demo", "--name", "ci-demo", "--package", "npm", "--refresh"],
+      0,
+    )
+    const registryManifest = await fs.readFile(path.join(registryProject, "harness.yaml"), "utf8")
+    if (!registryManifest.includes("{env:CI_TOKEN}")) {
+      throw new Error("mcp add не превратил секрет в {env:CI_TOKEN}")
+    }
+    if (registryManifest.includes("super-secret")) throw new Error("секрет попал в манифест")
+
+    const registryPlan = JSON.parse(await runAsync(registryProject, ["plan", "--json"], 0))
+    if (!registryPlan.items.some((item) => item.target === "mcp:ci-demo" && item.action === "create")) {
+      throw new Error("plan не увидел MCP из реестра")
+    }
+    await runAsync(registryProject, ["apply"], 0)
+
+    const registryConfig = JSON.parse(
+      await fs.readFile(path.join(registryProject, ".opencode", "opencode.jsonc"), "utf8"),
+    )
+    const registryServer = registryConfig.mcp?.servers?.["ci-demo"]
+    if (registryServer?.command?.[0] !== "npx" || registryServer?.command?.at(-1) !== "ci-demo@1.2.3") {
+      throw new Error(`команда MCP из реестра неверна: ${JSON.stringify(registryServer)}`)
+    }
+    if (registryServer?.environment?.CI_TOKEN !== "{env:CI_TOKEN}") {
+      throw new Error("MCP env не ссылается на переменную окружения")
+    }
+  } finally {
+    delete process.env.HARNESS_REGISTRY_URL
+    await new Promise((resolve) => registryStub.close(resolve))
+  }
+
 
   /* Глобальный скоуп: init → apply → doctor в изолированном XDG */
   const globalProject = path.join(temp, "global-project")

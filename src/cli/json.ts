@@ -54,7 +54,8 @@ export interface UpdateJsonReport {
   dryRun: boolean
 }
 
-/** Код выхода plan: заблокированный план — ошибка (apply всё равно не пройдёт). */export function planExitCode(report: PlanReport): 0 | 1 {
+/** Код выхода plan: заблокированный план — ошибка (apply всё равно не пройдёт). */
+export function planExitCode(report: PlanReport): 0 | 1 {
   return report.blocked === undefined ? 0 : 1
 }
 

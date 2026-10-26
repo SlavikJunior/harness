@@ -4,10 +4,12 @@ import { HarnessError } from "../core/errors.js"
 import { fail } from "../core/log.js"
 import { initCommand } from "./init.js"
 import { planCommand } from "./plan.js"
+import { diffCommand } from "./diff.js"
 import { applyCommand } from "./apply.js"
 import { updateCommand } from "./update.js"
 import { doctorCommand } from "./doctor.js"
 import { addCommand } from "./add.js"
+import { mcpCommand } from "./mcp.js"
 import { skillsCommand } from "./skills.js"
 import { sourcesCommand } from "./sources.js"
 
@@ -22,10 +24,12 @@ program
 
 program.addCommand(initCommand)
 program.addCommand(planCommand)
+program.addCommand(diffCommand)
 program.addCommand(applyCommand)
 program.addCommand(updateCommand)
 program.addCommand(doctorCommand)
 program.addCommand(addCommand)
+program.addCommand(mcpCommand)
 program.addCommand(skillsCommand)
 program.addCommand(sourcesCommand)
 

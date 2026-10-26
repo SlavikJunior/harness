@@ -1,12 +1,12 @@
 import path from "node:path"
 import os from "node:os"
-import { parseTree, findNodeAtLocation, type JSONPath } from "jsonc-parser"
+import { type JSONPath } from "jsonc-parser"
 import { deepEqual, stableStringify } from "../core/hash.js"
 import { sha256 } from "../core/fs.js"
 import { isDirectory, readText, sha256Dir } from "../core/fs.js"
 import { MANAGED_CONFIG_FILE } from "../manifest/file.js"
 import type { PermissionRule, SkillMode } from "../manifest/schema.js"
-import { validateJsoncText } from "./config.js"
+import { validateJsoncText, valueAt } from "./config.js"
 import { skillTargetDir } from "./desired.js"
 import { sameLinkTarget } from "./link.js"
 import type { DesiredState } from "./types.js"
@@ -22,18 +22,6 @@ import { normalizeAgentContent } from "./agents.js"
 import { scopeFrom, type ScopeInput } from "../scope.js"
 
 /** Diff текущего состояния проекта против желаемого → PlanReport. */
-
-function valueAt(jsoncText: string, jsonPath: JSONPath): unknown {
-  const tree = parseTree(jsoncText)
-  if (tree === undefined) return undefined
-  const node = findNodeAtLocation(tree, jsonPath)
-  if (node === undefined) return undefined
-  try {
-    return JSON.parse(jsoncText.slice(node.offset, node.offset + node.length))
-  } catch {
-    return undefined
-  }
-}
 
 function globalConfigFiles(): string[] {
   const base =
@@ -71,11 +59,11 @@ export async function computePlan(
 
   for (const [key, value] of desiredPassthrough) {
     const target = `config:${key}`
-    if (!fileExists) {
+    const current = fileExists ? valueAt(text, [key]) : undefined
+    if (current === undefined) {
       items.push({ kind: "config", action: "create", target, detail: stringifyShort(maskSecrets(value, key)) })
       continue
     }
-    const current = valueAt(text, [key])
     const recordedHash = state.configKeys[key]
     const userEdited = recordedHash !== undefined && sha256(stableStringify(current)) !== recordedHash
     if (deepEqual(current, value)) {

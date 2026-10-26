@@ -1,13 +1,11 @@
 import { Command } from "commander"
-import { parseDocument, type Document, type YAMLSeq } from "yaml"
+import type { Document, YAMLSeq } from "yaml"
 import { HarnessError } from "../core/errors.js"
-import { readText, writeTextAtomic } from "../core/fs.js"
-import { MANIFEST_PATH, validateManifestText } from "../manifest/load.js"
-import type { Manifest } from "../manifest/schema.js"
 import { scanManifest } from "../secrets/scan.js"
 import { ok, fail } from "../core/log.js"
 import { printSecretFindings } from "./print.js"
-import { resolveScope, scopeFrom, type ScopeInput } from "../scope.js"
+import { editManifest } from "./manifest-edit.js"
+import { resolveScope } from "../scope.js"
 
 /** `harness add skill|mcp`: точечные правки манифеста (комментарии сохраняются). */
 
@@ -22,31 +20,6 @@ function parseKv(pairs: string[] | undefined, separator: string, what: string): 
     result[key] = value
   }
   return result
-}
-
-async function editManifest(input: ScopeInput, edit: (doc: Document) => void): Promise<Manifest> {
-  const scope = scopeFrom(input)
-  const file = MANIFEST_PATH(scope)
-  const text = await readText(file)
-  if (text === undefined) {
-    throw new HarnessError(
-      `Манифест не найден: ${file}`,
-      `Сначала: harness${scope.kind === "global" ? " --global" : ""} init`,
-    )
-  }
-  const doc = parseDocument(text)
-  edit(doc)
-  /* добавленные коллекции — в блочном стиле (draft-манифест использует flow [], {}) */
-  for (const key of ["skills", "mcp"]) {
-    const node = doc.get(key)
-    if (node !== null && node !== undefined && typeof node === "object" && "flow" in node) {
-      ;(node as { flow?: boolean }).flow = false
-    }
-  }
-  const nextText = doc.toString()
-  const manifest = validateManifestText(nextText) // защита от поломки манифеста своей же правкой
-  await writeTextAtomic(file, nextText)
-  return manifest
 }
 
 export const addCommand = new Command("add")

@@ -1,9 +1,5 @@
 import { Command } from "commander"
-import { loadManifest } from "../manifest/load.js"
-import { buildCatalog } from "../catalog/index.js"
-import { buildDesiredState, catalogRefs } from "../apply/desired.js"
-import { computePlan } from "../apply/plan.js"
-import { loadState } from "../apply/state.js"
+import { loadContext } from "../apply/context.js"
 import { scanManifest } from "../secrets/scan.js"
 import { printPlanReport } from "./print.js"
 import { planExitCode, planReportJson } from "./json.js"
@@ -18,12 +14,7 @@ export const planCommand = new Command("plan")
   .option("--global", "глобальный скоуп: ~/.config/opencode и ~/.config/harness")
   .action(async (options: { json?: boolean; global?: boolean }, command: Command) => {
     const scope = await resolveScope(process.cwd(), { global: command.optsWithGlobals().global === true })
-    const manifest = await loadManifest(scope)
-    const refs = catalogRefs(manifest)
-    const catalog = await buildCatalog({ refs, sourceFilter: Object.keys(refs) })
-    const desired = buildDesiredState(scope, manifest, catalog)
-    const state = await loadState(scope)
-    const plan = await computePlan(scope, desired, state)
+    const { manifest, plan } = await loadContext(scope)
 
     if (options.json === true) {
       console.log(JSON.stringify(planReportJson(plan, scanManifest(manifest)), null, 2))

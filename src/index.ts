@@ -14,7 +14,18 @@ export { detectStacks, type DetectResult } from "./detect/index.js"
 export { buildCatalog, parseFrontmatter, scanMirror, ensureMirror, mirrorsRoot, sourcesFile, loadSources } from "./catalog/index.js"
 export { buildDesiredState, catalogRefs, SKILLS_DIR } from "./apply/desired.js"
 export { computePlan } from "./apply/plan.js"
+export { computeDiff, diffText, type DiffEntry, type DiffLine, type DiffReport } from "./apply/diff.js"
+export { loadContext, type HarnessContext } from "./apply/context.js"
 export { applyDesired } from "./apply/apply.js"
+export {
+  createBackup,
+  listBackups,
+  restoreBackup,
+  BACKUP_RETENTION,
+  type BackupEntry,
+  type BackupRecord,
+  type RestoreOutcome,
+} from "./apply/backup.js"
 export { createReferenceLink, normalizeLinkTarget, sameLinkTarget } from "./apply/link.js"
 export { agentFilePath, agentRelativePath, normalizeAgentContent, renderAgent } from "./apply/agents.js"
 export {
@@ -28,6 +39,30 @@ export {
 } from "./apply/instructions.js"
 export { loadState, saveState, STATE_FILE } from "./apply/state.js"
 export { runDoctor } from "./verify/doctor.js"
+export { autoFix, unsafeReasons, type AutoFixResult } from "./verify/fix.js"
+export {
+  changedUpstreams,
+  parseLsRemote,
+  resolveUpstreamRefs,
+  upstreamKey,
+  type UpstreamResolution,
+  type UpstreamState,
+} from "./catalog/upstream.js"
+export {
+  createRegistryClient,
+  draftFromRegistry,
+  registryCacheRoot,
+  registryServerView,
+  sanitizeMcpName,
+  summarizeTransport,
+  type RegistryClient,
+  type RegistryClientOptions,
+  type RegistryDraft,
+  type RegistryDraftOptions,
+  type RegistrySearchResult,
+  type RegistryServer,
+  type RegistryServerView,
+} from "./registry/index.js"
 export { scanManifest, classifyValue, maskSecrets, maskText, SECRET_MASK, type SecretFinding, type SecretKind } from "./secrets/scan.js"
 export {
   displayPath,

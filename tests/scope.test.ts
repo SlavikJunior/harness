@@ -126,9 +126,9 @@ config:
     const desired = buildDesiredState(scope, manifest, catalog)
     const state = emptyState()
     const plan = await computePlan(scope, desired, state)
-    /* Существующий глобальный конфиг: новые ключи — update, остальное — create */
-    expect(plan.items.filter((item) => item.action === "create")).toHaveLength(6)
-    expect(plan.items.find((item) => item.target === "config:model")?.action).toBe("update")
+    /* Существующий глобальный конфиг: отсутствующий ключ — create */
+    expect(plan.items.filter((item) => item.action === "create")).toHaveLength(7)
+    expect(plan.items.find((item) => item.target === "config:model")?.action).toBe("create")
     expect(plan.conflicts).toHaveLength(0)
 
     await applyDesired(scope, desired, plan, state)

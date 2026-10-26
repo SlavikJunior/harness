@@ -11,6 +11,20 @@ import { HarnessError } from "../core/errors.js"
 const FORMAT: { insertSpaces: true; tabSize: 2 } = { insertSpaces: true, tabSize: 2 }
 export const SCHEMA_URL = "https://opencode.ai/config.json"
 
+/** Значение JSONC по пути; undefined — ключа/файла нет или текст битый. */
+export function valueAt(jsoncText: string | undefined, jsonPath: JSONPath): unknown {
+  if (jsoncText === undefined) return undefined
+  const tree = parseTree(jsoncText)
+  if (tree === undefined) return undefined
+  const node = findNodeAtLocation(tree, jsonPath)
+  if (node === undefined) return undefined
+  try {
+    return JSON.parse(jsoncText.slice(node.offset, node.offset + node.length))
+  } catch {
+    return undefined
+  }
+}
+
 /** undefined, если текст корректный JSONC; иначе человекочитаемое сообщение. */
 export function validateJsoncText(text: string | undefined): string | undefined {
   if (text === undefined) return undefined
