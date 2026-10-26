@@ -22,6 +22,15 @@ describe("mapMcpServer", () => {
     })
   })
 
+  it("local: флаг секрета в аргументах → skip", () => {
+    const result = mapMcpServer("gns3", {
+      type: "local",
+      command: ["uvx", "gns3-mcp", "--password", "admin"],
+    })
+    expect(result.status).toBe("skipped")
+    expect(result.message).toContain("флаг секрета")
+  })
+
   it("local: смешанная подстановка, {file:...} и секрет в аргументах → skip", () => {
     expect(
       mapMcpServer("x", {

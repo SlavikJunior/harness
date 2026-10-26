@@ -1,4 +1,4 @@
-import { applyEdits, format, modify, parse, parseTree, findNodeAtLocation, type JSONPath } from "jsonc-parser"
+import { applyEdits, format, getNodeValue, modify, parse, parseTree, findNodeAtLocation, type JSONPath } from "jsonc-parser"
 import { deepEqual } from "../core/hash.js"
 import { HarnessError } from "../core/errors.js"
 
@@ -18,11 +18,7 @@ export function valueAt(jsoncText: string | undefined, jsonPath: JSONPath): unkn
   if (tree === undefined) return undefined
   const node = findNodeAtLocation(tree, jsonPath)
   if (node === undefined) return undefined
-  try {
-    return JSON.parse(jsoncText.slice(node.offset, node.offset + node.length))
-  } catch {
-    return undefined
-  }
+  return getNodeValue(node)
 }
 
 /** undefined, если текст корректный JSONC; иначе человекочитаемое сообщение. */
@@ -59,11 +55,7 @@ export class ConfigEditor {
     if (tree === undefined) return undefined
     const node = findNodeAtLocation(tree, path)
     if (node === undefined) return undefined
-    try {
-      return JSON.parse(this.text.slice(node.offset, node.offset + node.length))
-    } catch {
-      return undefined
-    }
+    return getNodeValue(node)
   }
 
   /** Наличие ключа по полному пути (включая сам ключ — сканов детей не нужно: modify сам проверит). */

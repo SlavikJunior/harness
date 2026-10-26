@@ -260,7 +260,9 @@ describe("codex export (project)", () => {
     expect(await fs.readFile(path.join(fixture.project, ".codex/config.toml"), "utf8")).toContain("live-mcp")
 
     await fs.rm(path.join(fixture.project, ".agents/skills/manual"), { recursive: true, force: true })
+    await fs.rm(path.join(fixture.project, ".agents/skills/nested-skill"), { recursive: true, force: true })
     await fs.rm(path.join(fixture.project, ".codex/agents/manual.toml"), { force: true })
+    await fs.rm(path.join(fixture.project, ".codex/agents/linked.toml"), { force: true })
     await fs.rm(path.join(fixture.project, ".harness/codex-state.json"), { force: true })
     const only = await exportCodex(fixture.scope, {
       manifestOnly: true,

@@ -23,8 +23,15 @@ export interface McpMapResult {
 const WHOLE_REF_RE = /^\{(env|file):([^}]+)\}$/
 const ANY_REF_RE = /\{(?:env|file):[^}]+\}/
 const BEARER_REF_RE = /^Bearer\s+\{(?:env):([^}]+)\}$/i
+const SECRET_FLAG_RE =
+  /^--?(?:password|passwd|token|api[-_]?key|secret|client[-_]?secret|auth|authorization|bearer)$/i
+const SECRET_FLAG_ASSIGN_RE =
+  /^--?[A-Za-z0-9_-]*(?:password|passwd|token|api[-_]?key|secret|auth|authorization|bearer)=/i
 
 function checkArg(value: string): string | undefined {
+  if (SECRET_FLAG_RE.test(value) || SECRET_FLAG_ASSIGN_RE.test(value)) {
+    return "в аргументах есть флаг секрета, который Codex не умеет подставлять из env"
+  }
   if (ANY_REF_RE.test(value)) return "в аргументах есть подстановка {env:...}, которую Codex не раскрывает"
   if (classifyValue(undefined, value) !== undefined) return "в аргументах похоже на плейнтекст-секрет"
   return undefined

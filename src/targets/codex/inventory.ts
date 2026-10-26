@@ -6,6 +6,7 @@ import { pathExists, readText } from "../../core/fs.js"
 import { deepEqual } from "../../core/hash.js"
 import { instructionsFilePath, type InstructionBlock } from "../../apply/instructions.js"
 import { buildCatalog } from "../../catalog/index.js"
+import { parseFrontmatter } from "../../catalog/scan.js"
 import { buildDesiredState, catalogRefs } from "../../apply/desired.js"
 import { validateManifestText } from "../../manifest/load.js"
 import { agentDefinitionSchema, mcpServerSchema, type Manifest, type MCPServer } from "../../manifest/schema.js"
@@ -44,18 +45,53 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function parseAgentFile(text: string): { definition?: ReturnType<typeof agentDefinitionSchema.parse>; warning?: string } {
+/** Мягкий разбор frontmatter: OpenCode допускает `: ` в незакавыченном description. */
+function parseFrontmatterLoose(block: string): Record<string, string> {
+  const result: Record<string, string> = {}
+  let current: string | undefined
+  for (const line of block.split("\n")) {
+    const key = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line)
+    if (key !== null && !line.startsWith(" ") && !line.startsWith("\t")) {
+      const name = key[1]
+      if (name === undefined) continue
+      current = name
+      result[name] = key[2] ?? ""
+      continue
+    }
+    if (current !== undefined && /^\s+/.test(line)) {
+      const value = line.trim()
+      if (value !== "") result[current] = `${result[current] ?? ""} ${value}`.trim()
+    }
+  }
+  return result
+}
+
+function unquote(value: string): string {
+  if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+    return value.slice(1, -1)
+  }
+  return value
+}
+
+function parseAgentFile(text: string): {
+  definition?: ReturnType<typeof agentDefinitionSchema.parse>
+  warning?: string
+  hasPermission?: boolean
+} {
   const lines = text.replace(/\r\n/g, "\n").split("\n")
   if (lines[0]?.trim() !== "---") return { warning: "нет frontmatter" }
   const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---")
   if (end === -1) return { warning: "frontmatter не закрыт" }
+  const block = lines.slice(1, end).join("\n")
   let frontmatter: unknown
   try {
-    frontmatter = parseYaml(lines.slice(1, end).join("\n"))
+    frontmatter = parseYaml(block)
   } catch {
-    return { warning: "frontmatter не парсится как YAML" }
+    const loose = parseFrontmatterLoose(block)
+    frontmatter = Object.fromEntries(Object.entries(loose).map(([key, value]) => [key, unquote(value)]))
   }
   if (!isRecord(frontmatter)) return { warning: "frontmatter не объект" }
+  const hasPermission = frontmatter.permission !== undefined || frontmatter.permissions !== undefined
   const body = lines.slice(end + 1).join("\n").trim()
   const candidate = {
     ...(typeof frontmatter.description === "string" ? { description: frontmatter.description } : {}),
@@ -68,7 +104,118 @@ function parseAgentFile(text: string): { definition?: ReturnType<typeof agentDef
   }
   const parsed = agentDefinitionSchema.safeParse(candidate)
   if (!parsed.success) return { warning: `агент не прошёл схему: ${parsed.error.issues[0]?.message ?? "ошибка"}` }
-  return { definition: parsed.data }
+  return { definition: parsed.data, hasPermission }
+}
+
+const LIVE_MAX_DEPTH = 6
+const LIVE_IGNORED: ReadonlySet<string> = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "target",
+  ".gradle",
+  "coverage",
+  "vendor",
+])
+
+interface DiscoveredLiveSkill {
+  dir: string
+  rel: string
+  viaLink: boolean
+}
+
+/**
+ * Рекурсивный скан фактических скиллов OpenCode.
+ *
+ * OpenCode допускает коллекции (`android-official/<категория>/<skill>`),
+ * поэтому одного уровня недостаточно. Симлинки разворачиваются: режим
+ * reference сохраняется, если скилл (или его родитель) был ссылкой.
+ */
+async function discoverLiveSkills(
+  root: string,
+  known: ReadonlySet<string>,
+): Promise<{ skills: CodexDesiredSkill[]; items: CodexItem[] }> {
+  const found: DiscoveredLiveSkill[] = []
+  const queue: { dir: string; rel: string; depth: number; viaLink: boolean }[] = [
+    { dir: root, rel: "", depth: 0, viaLink: false },
+  ]
+  const visited = new Set<string>()
+
+  while (queue.length > 0) {
+    const item = queue.shift()
+    if (item === undefined) continue
+    const real = await fs.realpath(item.dir).catch(() => item.dir)
+    if (visited.has(real)) continue
+    visited.add(real)
+
+    const skillFile = await readText(path.join(item.dir, "SKILL.md"))
+    if (skillFile !== undefined) {
+      found.push({ dir: item.dir, rel: item.rel, viaLink: item.viaLink })
+      continue
+    }
+    if (item.depth >= LIVE_MAX_DEPTH) continue
+
+    const entries = await fs.readdir(item.dir, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") || LIVE_IGNORED.has(entry.name)) continue
+      const full = path.join(item.dir, entry.name)
+      const stat = await fs.stat(full).catch(() => undefined)
+      if (stat?.isDirectory() !== true) continue
+      queue.push({
+        dir: full,
+        rel: item.rel === "" ? entry.name : `${item.rel}/${entry.name}`,
+        depth: item.depth + 1,
+        viaLink: item.viaLink || entry.isSymbolicLink(),
+      })
+    }
+  }
+
+  const skills: CodexDesiredSkill[] = []
+  const items: CodexItem[] = []
+  const seen = new Set<string>()
+  for (const item of found.toSorted((left, right) => left.rel.localeCompare(right.rel))) {
+    const text = await readText(path.join(item.dir, "SKILL.md"))
+    if (text === undefined) continue
+    const frontmatter = parseFrontmatter(text)
+    const name = frontmatter.name ?? path.basename(item.rel === "" ? item.dir : item.rel)
+    if (known.has(name)) continue
+    if (!/^[A-Za-z0-9_.-]+$/.test(name)) {
+      items.push({ section: "skills", name, status: "skipped", message: "недопустимое имя скилла" })
+      continue
+    }
+    if (seen.has(name)) {
+      items.push({ section: "skills", name, status: "skipped", message: "дубликат имени live-скилла" })
+      continue
+    }
+    const sourceDir = item.viaLink ? await fs.realpath(item.dir).catch(() => undefined) : item.dir
+    if (sourceDir === undefined) {
+      items.push({ section: "skills", name, status: "skipped", message: "битая reference-ссылка" })
+      continue
+    }
+    seen.add(name)
+    skills.push({ name, sourceDir, mode: item.viaLink ? "reference" : "vendor", origin: "live" })
+  }
+  return { skills, items }
+}
+
+interface NormalizedLiveMcp {
+  server?: MCPServer
+  disabled?: boolean
+  reason?: string
+}
+
+function normalizeLiveMcp(raw: unknown): NormalizedLiveMcp {
+  if (!isRecord(raw)) return { reason: "MCP-сервер не объект" }
+  const { disabled, ...rest } = raw
+  if (disabled === true) return { disabled: true }
+  if (disabled !== undefined && typeof disabled !== "boolean") {
+    return { reason: "disabled должен быть boolean" }
+  }
+  const parsed = mcpServerSchema.safeParse(rest)
+  if (!parsed.success) {
+    return { reason: parsed.error.issues[0]?.message ?? "не соответствует схеме harness" }
+  }
+  return { server: parsed.data }
 }
 
 export async function inventoryCodex(
@@ -106,41 +253,33 @@ export async function inventoryCodex(
     agents.push({ name, definition, origin: "manifest" })
   }
 
-  /* Live-only скиллы */
+  /* Live-only скиллы: коллекции и симлинки */
   if (options.manifestOnly !== true) {
     const knownSkills = new Set(skills.map((skill) => skill.name))
-    const entries = await fs.readdir(scope.skillsDir, { withFileTypes: true }).catch(() => [])
-    for (const entry of entries) {
-      if (entry.name.startsWith(".") || knownSkills.has(entry.name)) continue
-      const target = path.join(scope.skillsDir, entry.name)
-      if (!(await pathExists(path.join(target, "SKILL.md")))) continue
-      const stat = await fs.lstat(target).catch(() => undefined)
-      if (stat === undefined) continue
-      let sourceDir = target
-      let mode: "vendor" | "reference" = "vendor"
-      if (stat.isSymbolicLink()) {
-        const resolved = await fs.realpath(target).catch(() => undefined)
-        if (resolved === undefined) {
-          items.push({ section: "skills", name: entry.name, status: "skipped", message: "битая reference-ссылка" })
-          continue
-        }
-        sourceDir = resolved
-        mode = "reference"
-      } else if (!(await fs.stat(target).then((value) => value.isDirectory()).catch(() => false))) {
-        continue
-      }
-      skills.push({ name: entry.name, sourceDir, mode, origin: "live" })
-    }
+    const liveSkills = await discoverLiveSkills(scope.skillsDir, knownSkills)
+    skills.push(...liveSkills.skills)
+    items.push(...liveSkills.items)
 
-    /* Live-only агенты */
+    /* Live-only агенты: symlink на .md тоже валиден */
     const knownAgents = new Set(agents.map((agent) => agent.name))
     const agentFiles = await fs.readdir(scope.agentsDir, { withFileTypes: true }).catch(() => [])
     for (const file of agentFiles) {
-      if (!file.isFile() || !file.name.endsWith(".md")) continue
+      if (!file.name.endsWith(".md")) continue
       const name = file.name.slice(0, -3)
       if (knownAgents.has(name)) continue
-      const text = await readText(path.join(scope.agentsDir, file.name))
-      if (text === undefined) continue
+      const target = path.join(scope.agentsDir, file.name)
+      const stat = await fs.stat(target).catch(() => undefined)
+      if (stat?.isFile() !== true) {
+        if (file.isSymbolicLink()) {
+          items.push({ section: "agents", name, status: "skipped", message: "битая symlink-ссылка" })
+        }
+        continue
+      }
+      const text = await readText(target)
+      if (text === undefined) {
+        items.push({ section: "agents", name, status: "skipped", message: "не удалось прочитать файл" })
+        continue
+      }
       const parsed = parseAgentFile(text)
       if (parsed.definition === undefined) {
         items.push({
@@ -152,28 +291,51 @@ export async function inventoryCodex(
         continue
       }
       agents.push({ name, definition: parsed.definition, origin: "live" })
+      if (parsed.hasPermission === true) {
+        items.push({
+          section: "agents",
+          name,
+          status: "approximate",
+          message: "permission/permissions агента не переносятся: Codex наследует sandbox/approval родителя",
+        })
+      }
     }
 
-    /* Live MCP: manifest wins, live-only добавляем */
+    /* Live MCP: manifest wins, live-only добавляем; disabled/чужие поля нормализуем */
     const configText = await readText(scope.configFile)
     const liveServers = valueAt(configText, ["mcp", "servers"])
     if (isRecord(liveServers)) {
       for (const [name, raw] of Object.entries(liveServers)) {
-        const parsed = mcpServerSchema.safeParse(raw)
-        if (!parsed.success) {
-          items.push({
-            section: "mcp",
-            name,
-            status: "skipped",
-            message: "MCP в OpenCode-конфиге не соответствует схеме harness",
-          })
+        const live = normalizeLiveMcp(raw)
+        const declared = mcp[name]
+        if (live.disabled === true) {
+          if (declared === undefined) {
+            items.push({ section: "mcp", name, status: "skipped", message: "отключён в OpenCode (disabled)" })
+          } else {
+            items.push({
+              section: "mcp",
+              name,
+              status: "approximate",
+              message: "в OpenCode отключён, но есть в манифесте; использован манифест",
+            })
+          }
           continue
         }
-        const declared = mcp[name]
+        if (live.server === undefined) {
+          if (declared === undefined) {
+            items.push({
+              section: "mcp",
+              name,
+              status: "skipped",
+              message: `MCP в OpenCode-конфиге не переносится: ${live.reason ?? "неизвестная ошибка"}`,
+            })
+          }
+          continue
+        }
         if (declared === undefined) {
-          mcp[name] = parsed.data
+          mcp[name] = live.server
           mcpOrigins[name] = "live"
-        } else if (!deepEqual(declared, parsed.data)) {
+        } else if (!deepEqual(declared, live.server)) {
           items.push({
             section: "mcp",
             name,

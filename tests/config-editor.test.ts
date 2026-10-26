@@ -28,6 +28,19 @@ describe("ConfigEditor", () => {
     expect(check(editor.currentText, "old")).toBe(false)
   })
 
+  it("valueAt читает JSONC с trailing comma", () => {
+    const text = `{
+  // комментарий
+  "mcp": {
+    "servers": {
+      "tester": { "type": "local", "command": ["echo", "hi"], },
+    },
+  },
+}`
+    const editor = ConfigEditor.from(text)
+    expect(deepEqual(editor.valueAt(["mcp", "servers", "tester"]), { type: "local", command: ["echo", "hi"] })).toBe(true)
+  })
+
   it("set идемпотентен при том же значении", () => {
     const editor = ConfigEditor.from('{"a": 1}')
     expect(editor.set(["a"], 1)).toBe(false)
