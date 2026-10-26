@@ -9,7 +9,8 @@ import { loadState } from "../apply/state.js"
 import { validateJsoncText } from "../apply/config.js"
 import { scanManifest } from "../secrets/scan.js"
 import { lintPermissions } from "./permissions.js"
-import { permissionsSchema } from "../manifest/schema.js"
+import { lintPolicies } from "./policies.js"
+import { permissionsSchema, policiesSchema } from "../manifest/schema.js"
 import {
   extractInstructionPaths,
   instructionsFilePath,
@@ -116,6 +117,15 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
           push("error", `permissions${where}: ${issue?.message ?? "некорректное правило"}`)
         }
       }
+      const actualPolicies = valueAt(text, ["policies"])
+      if (actualPolicies !== undefined) {
+        const parsedRules = policiesSchema.safeParse(actualPolicies)
+        if (!parsedRules.success) {
+          const issue = parsedRules.error.issues[0]
+          const where = issue !== undefined && issue.path.length > 0 ? `[${issue.path.join(".")}]` : ""
+          push("error", `policies${where}: ${issue?.message ?? "некорректная политика"}`)
+        }
+      }
     }
   }
 
@@ -127,6 +137,25 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
       push("ok", `permissions: задано правил — ${desired.permissions.length}`)
     }
     for (const lint of lintPermissions(desired.permissions)) push("warn", lint.message)
+  }
+
+  /* Policies: линты ширины запретов */
+  if (desired.policies !== undefined) {
+    if (desired.policies.length === 0) {
+      push("ok", "policies: пустой список — жёстких запретов нет")
+    } else {
+      push("ok", `policies: задано запретов — ${desired.policies.length}`)
+    }
+    for (const lint of lintPolicies(desired.policies)) push("warn", lint.message)
+  }
+
+  /* Агенты: файлы должны существовать; содержимое сверяет обычный план */
+  for (const agent of desired.agents) {
+    if (await pathExists(agent.file)) {
+      push("ok", `агент ${agent.name}: ${agent.relativePath}`)
+    } else {
+      push("warn", `агент ${agent.name}: ${agent.relativePath} не создан — запусти harness apply`)
+    }
   }
 
   /* Бинарники локальных MCP-серверов */

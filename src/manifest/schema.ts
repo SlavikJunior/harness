@@ -67,6 +67,57 @@ export type PermissionRule = z.infer<typeof permissionRuleSchema>
 
 export const permissionsSchema = z.array(permissionRuleSchema)
 
+/**
+ * Policies V2 — жёсткий deny поверх permissions: политика может только
+ * запретить, поэтому `allow`/`ask` в ней были бы ложным обещанием.
+ */
+export const policyRuleSchema = z
+  .object({
+    action: z.string().min(1).regex(/^\S+$/, "action не должен содержать пробелов"),
+    resource: z.string().min(1),
+    effect: z.literal("deny"),
+  })
+  .strict()
+export type PolicyRule = z.infer<typeof policyRuleSchema>
+
+export const policiesSchema = z.array(policyRuleSchema)
+
+/** Имя агента: id = имя файла `.opencode/agents/<name>.md`. */
+export const agentNameSchema = z
+  .string()
+  .min(1)
+  .regex(/^[a-zA-Z0-9_.-]+$/, "имя агента: буквы, цифры, _ . -")
+
+export const agentModeSchema = z.enum(["primary", "subagent", "all"])
+export type AgentMode = z.infer<typeof agentModeSchema>
+
+/**
+ * Markdown-агент: frontmatter + body как system prompt.
+ * Поддерживаются только поля, которые harness рендерит сам; остальное
+ * (hidden, steps, color, request) — вне MVP, чтобы не имитировать полноту.
+ */
+export const agentDefinitionSchema = z
+  .object({
+    description: z.string().min(1).optional(),
+    mode: agentModeSchema.optional(),
+    model: z.string().min(1).optional(),
+    permissions: permissionsSchema.optional(),
+    body: z.string().optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.description !== undefined ||
+      value.mode !== undefined ||
+      value.model !== undefined ||
+      value.permissions !== undefined ||
+      (value.body ?? "").trim() !== "",
+    "агент пуст: укажи description/mode/model/permissions или body",
+  )
+export type AgentDefinition = z.infer<typeof agentDefinitionSchema>
+
+export const agentsSchema = z.record(agentNameSchema, agentDefinitionSchema)
+
 /** Имя управляемого блока в AGENTS.md: входит в маркер `<!-- harness:begin:NAME -->`. */
 export const instructionBlockNameSchema = z
   .string()
@@ -108,10 +159,14 @@ export const manifestSchema = z
     instructions: instructionsSchema.optional(),
     /** правила V2 для .opencode/opencode.jsonc → top-level `permissions` */
     permissions: permissionsSchema.optional(),
+    /** политики V2: жёсткий deny поверх permissions (top-level `policies`) */
+    policies: policiesSchema.optional(),
+    /** markdown-агенты `.opencode/agents/<name>.md` */
+    agents: agentsSchema.optional(),
     /** passthrough: значения пишутся как top-level поля .opencode/opencode.jsonc */
     config: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()
 export type Manifest = z.infer<typeof manifestSchema>
 
-export const reservedConfigKeys = ["skills", "mcp", "permissions", "policies"] as const
+export const reservedConfigKeys = ["skills", "mcp", "permissions", "policies", "agents"] as const

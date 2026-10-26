@@ -14,6 +14,7 @@ import {
   renderInstructionBlocks,
 } from "./instructions.js"
 import { createReferenceLink } from "./link.js"
+import { agentFilePath } from "./agents.js"
 
 /** Исполнение плана: приводит проект к DesiredState (идемпотентно). */
 
@@ -54,10 +55,15 @@ async function buildNextState(desired: DesiredState): Promise<HarnessState> {
         ]),
       ),
     },
+    agents: {},
   }
   for (const [key, value] of Object.entries(desired.config)) state.configKeys[key] = hashValue(value)
   for (const [name, server] of Object.entries(desired.mcpServers)) state.mcp[name] = hashValue(server)
   if (desired.permissions !== undefined) state.permissions = { sha: hashValue(desired.permissions) }
+  if (desired.policies !== undefined) state.policies = { sha: hashValue(desired.policies) }
+  for (const agent of desired.agents) {
+    state.agents[agent.name] = { sha: sha256(agent.content), at: state.appliedAt }
+  }
   for (const skill of desired.skills) {
     const mode: SkillMode = skill.entry.mode ?? "vendor"
     const record: StateSkill = {
@@ -115,6 +121,13 @@ export async function applyDesired(
     configChanged = editor.remove(["permissions"]) || configChanged
   }
 
+  /* Policies: та же модель ownership, но эффект только deny */
+  if (desired.policies !== undefined) {
+    configChanged = editor.set(["policies"], desired.policies) || configChanged
+  } else if (state.policies !== undefined) {
+    configChanged = editor.remove(["policies"]) || configChanged
+  }
+
   if (configChanged) await writeTextAtomic(managedFile, `${editor.currentText.trimEnd()}\n`)
 
   /* Инструкции: только управляемые блоки, пользовательский текст не трогается */
@@ -155,6 +168,21 @@ export async function applyDesired(
     if (item.action !== "remove" || !item.target.startsWith("skill:")) continue
     const installName = item.target.slice("skill:".length)
     await fs.rm(path.join(projectRoot, ".opencode", "skills", installName), { recursive: true, force: true })
+  }
+
+  /* Агенты: пишем только изменённые файлы, удаляем — только записанные в state */
+  const changedAgents = new Set(
+    plan.items
+      .filter((item) => item.kind === "agent" && item.action !== "unchanged")
+      .map((item) => item.target),
+  )
+  for (const agent of desired.agents) {
+    if (!changedAgents.has(`agent:${agent.name}`)) continue
+    await writeTextAtomic(agent.file, agent.content)
+  }
+  for (const item of plan.items) {
+    if (item.action !== "remove" || !item.target.startsWith("agent:")) continue
+    await fs.rm(agentFilePath(projectRoot, item.target.slice("agent:".length)), { force: true })
   }
 
   /* State + gitignore */

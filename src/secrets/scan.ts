@@ -224,6 +224,11 @@ export function scanManifest(manifest: Manifest): SecretFinding[] {
   }
 
   walkConfig(manifest.config ?? {}, ["config"], context)
+
+  /* body агента — это system prompt, туда тоже не должен попадать плейнтекст */
+  for (const [name, agent] of Object.entries(manifest.agents ?? {})) {
+    if (agent.body !== undefined) checkValue(["agents", name, "body"], undefined, agent.body, context)
+  }
   return context.findings
 }
 

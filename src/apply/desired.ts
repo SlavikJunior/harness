@@ -5,6 +5,7 @@ import { HarnessError } from "../core/errors.js"
 import type { DesiredSkill, DesiredState } from "./types.js"
 import type { SkillEntry } from "../manifest/schema.js"
 import { DEFAULT_INSTRUCTIONS_FILE, type InstructionBlock } from "./instructions.js"
+import { agentFilePath, agentRelativePath, renderAgent } from "./agents.js"
 
 /** Сборка DesiredState: манифест + каталог → что именно применить. */
 
@@ -122,10 +123,21 @@ export function buildDesiredState(
     }
   })
 
+  const agents = Object.entries(manifest.agents ?? {})
+    .map(([name, definition]) => ({
+      name,
+      definition,
+      content: renderAgent(definition),
+      file: agentFilePath(root, name),
+      relativePath: agentRelativePath(name),
+    }))
+    .toSorted((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
+
   return {
     config: { ...(manifest.config ?? {}) },
     mcpServers: { ...(manifest.mcp ?? {}) },
     skills,
+    agents,
     instructions: {
       file: manifest.instructions?.file ?? DEFAULT_INSTRUCTIONS_FILE,
       blocks: (Object.entries(manifest.instructions?.blocks ?? {}) as [string, string][]).map(
@@ -133,6 +145,7 @@ export function buildDesiredState(
       ),
     },
     ...(manifest.permissions === undefined ? {} : { permissions: manifest.permissions }),
+    ...(manifest.policies === undefined ? {} : { policies: manifest.policies }),
   }
 }
 

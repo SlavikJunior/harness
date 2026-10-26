@@ -61,6 +61,8 @@ harness plan --json > plan.json && harness doctor --strict
 | MCP-серверы | `.opencode/opencode.jsonc` → `mcp.servers.<name>`. OpenCode deep-merge'ит по серверам — чужие серверы не затираются |
 | `config.*` | Passthrough: значения пишутся как top-level ключи управляемого конфига |
 | `permissions` | Top-level массив правил V2 `{ action, resource, effect }` — пишется как есть, порядок значим |
+| `policies` | Top-level массив жёстких запретов V2 (`effect` только `deny`) |
+| `agents` | Markdown `.opencode/agents/<name>.md`: frontmatter + body. Файл целиком наш, чужие агенты не трогаются |
 | `AGENTS.md` | Только содержимое между маркерами `<!-- harness:begin:NAME -->`. Остальной текст файла — пользовательский и сохраняется |
 
 Массив `skills` в конфиге OpenCode **не используется сознательно**: в V2 массивы
@@ -91,7 +93,56 @@ permissions:
 - нет секции — ключ `permissions` не управляется; убрал секцию после `apply` —
   записанные harness правила удаляются, чужие не трогаются.
 
-Не управляются: `policies` и `agents.<id>.permissions`.
+## Policies (V2)
+
+Политика — жёсткий `deny` поверх permissions и сохранённых approvals: она
+никогда не разрешает, только запрещает. Поэтому `effect` в схеме — строго
+`deny`, а `allow`/`ask` отклоняются ещё при валидации манифеста:
+
+```yaml
+policies:
+  - action: shell
+    resource: "sudo *"
+    effect: deny
+  - action: read
+    resource: "secrets/*"
+    effect: deny
+```
+
+- механика ownership и сравнения — как у `permissions`: массив пишется как
+  есть, порядок значим, чужие политики без записи в state не удаляются;
+- `doctor` предупредит о тотальном `*` / `*` deny и о `read "*"` deny —
+  такие запреты делают агента бесполезным и не чинятся проектным `allow`;
+- глобальные и Console-политики перекрывают проектные — из проекта их не
+  отменить.
+
+## Агенты
+
+Агенты описываются markdown-файлами `.opencode/agents/<name>.md`:
+frontmatter + body как system prompt.
+
+```yaml
+agents:
+  reviewer:
+    description: Ревью изменений без правок
+    mode: subagent
+    model: anthropic/claude-sonnet-5-5#high
+    permissions:
+      - action: edit
+        resource: "*"
+        effect: deny
+    body: |
+      Проверь текущие изменения и перечисли находки.
+```
+
+- поддерживаемые поля: `description`, `mode` (`primary|subagent|all`),
+  `model`, `permissions`, `body`; остальное (`hidden`, `steps`, `color`,
+  `request`) — вне MVP;
+- файл целиком управляется harness: ручная правка видна как drift и
+  перезаписывается при `apply`;
+- агент, убранный из манифеста, удаляется только если был записан в state;
+  чужие файлы с другими именами не трогаются;
+- одноимённый файл вне harness будет перезаписан с предупреждением в плане.
 
 ## Источники скиллов
 
@@ -169,9 +220,9 @@ instructions:
 ## State
 
 `.harness/state.json` (добавляется в `.gitignore`) хранит хеши применённого:
-конфиг-ключей, MCP-серверов, содержимого vendor-скиллов, блоков инструкций и
-массива `permissions`. На этом строятся идемпотентность apply и детекция
-drift-а (файл правили вне harness).
+конфиг-ключей, MCP-серверов, содержимого vendor-скиллов, блоков инструкций,
+массивов `permissions`/`policies` и markdown-агентов. На этом строятся
+идемпотентность apply и детекция drift-а (файл правили вне harness).
 
 ## Секреты
 
@@ -216,8 +267,10 @@ npm run build           # tsc → dist/
 - Только project-scope (глобальный конфиг не управляется)
 - `instructions` — один файл на проект (по умолчанию `AGENTS.md`); файл
   нормализуется к LF
-- `permissions` управляются только на top-level; `policies` и
-  `agents.<id>.permissions` — вне MVP
+- `permissions` и `policies` управляются только на top-level; agent-level
+  permissions задаются в markdown-агенте
+- Агенты — только поддерживаемые поля frontmatter; произвольные поля V2
+  (`hidden`, `steps`, `color`, `request`) не рендерятся
 - Symlink в reference-режиме на POSIX; на Windows — junction (без прав, но
   только локальные пути, не UNC). Если junction недоступен — `mode: vendor`
 - Секреты: аудит — только предупреждения (без блокировки apply); энтропийная

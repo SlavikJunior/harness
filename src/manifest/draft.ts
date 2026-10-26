@@ -48,6 +48,27 @@ mcp: {}
 #       resource: "git status *"
 #       effect: allow
 
+# Policies V2: жёсткий deny поверх permissions; эффект может быть только deny.
+# Пример:
+#   policies:
+#     - action: shell
+#       resource: "sudo *"
+#       effect: deny
+
+# Агенты: markdown .opencode/agents/<name>.md (frontmatter + body = system prompt).
+# Файл целиком управляется harness; агенты с другими именами не трогаются.
+# Пример:
+#   agents:
+#     reviewer:
+#       description: Ревью изменений без правок
+#       mode: subagent
+#       permissions:
+#         - action: edit
+#           resource: "*"
+#           effect: deny
+#       body: |
+#         Проверь текущие изменения и перечисли находки по убыванию важности.
+
 # Инструкции: управляемые блоки в AGENTS.md. Пиши конкретные команды и пути,
 # а не пожелания — doctor проверит, что пути из \`inline-code\` существуют.
 # Всё, что вне блоков <!-- harness:begin:NAME -->, не трогается.
@@ -64,7 +85,7 @@ instructions:
   blocks: {}
 
 # Passthrough: значения пишутся как top-level поля .opencode/opencode.jsonc.
-# Ключи skills, mcp, permissions, policies задавать здесь нельзя.
+# Ключи skills, mcp, permissions, policies, agents задавать здесь нельзя.
 # Пример:
 #   config:
 #     model: anthropic/claude-sonnet-5-5

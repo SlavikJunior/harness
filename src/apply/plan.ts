@@ -18,6 +18,7 @@ import {
   normalizeInstructionContent,
   parseInstructionBlocks,
 } from "./instructions.js"
+import { normalizeAgentContent } from "./agents.js"
 
 /** Diff текущего состояния проекта против желаемого → PlanReport. */
 
@@ -94,8 +95,28 @@ export async function computePlan(
     }
   }
 
-  /* Permissions (V2): отдельный массив, порядок правил значим */
-  assessPermissions(fileExists ? valueAt(text, ["permissions"]) : undefined, desired, state, items, drift)
+  /* Permissions и policies (V2): массивы правил, порядок значим */
+  assessRuleArray({
+    kind: "permissions",
+    target: "permissions",
+    current: fileExists ? valueAt(text, ["permissions"]) : undefined,
+    desiredRules: desired.permissions,
+    recorded: state.permissions?.sha,
+    items,
+    drift,
+  })
+  assessRuleArray({
+    kind: "policies",
+    target: "policies",
+    current: fileExists ? valueAt(text, ["policies"]) : undefined,
+    desiredRules: desired.policies,
+    recorded: state.policies?.sha,
+    items,
+    drift,
+  })
+
+  /* Markdown-агенты: файл целиком наш, чужие имена не трогаются */
+  await assessAgents(desired, state, items, drift)
 
   /* Инструкции (AGENTS.md): управляемые блоки */
   const instructionsBlocked = await assessInstructions(projectRoot, desired, state, items, drift)
@@ -173,7 +194,7 @@ export async function computePlan(
 }
 
 /** Русский счётчик правил: 1 правило, 2 правила, 5 правил. */
-function permissionsLabel(count: number): string {
+function rulesLabel(count: number): string {
   const mod10 = count % 10
   const mod100 = count % 100
   const word =
@@ -186,8 +207,8 @@ function permissionsLabel(count: number): string {
 }
 
 /** Что именно изменилось: количество или только порядок (порядок в V2 значим). */
-function describePermissionsChange(current: unknown, desired: readonly PermissionRule[]): string {
-  if (!Array.isArray(current)) return permissionsLabel(desired.length)
+function describeRulesChange(current: unknown, desired: readonly PermissionRule[]): string {
+  if (!Array.isArray(current)) return rulesLabel(desired.length)
   if (current.length !== desired.length) return `правил ${current.length} → ${desired.length}`
   const signature = (rules: readonly unknown[]): string => rules.map((rule) => stableStringify(rule)).toSorted().join("\n")
   if (signature(current) === signature(desired)) return "порядок правил изменён"
@@ -195,58 +216,118 @@ function describePermissionsChange(current: unknown, desired: readonly Permissio
 }
 
 /**
- * Permissions V2: массив правил одним ключом. Порядок значим (побеждает
- * последнее совпадение), поэтому сравнение — глубокое и упорядоченное.
- * Чужие правила без записи в state не удаляются: ownership только свой.
+ * Массив правил одним top-level ключом (permissions или policies).
+ * Порядок значим (побеждает последнее совпадение), поэтому сравнение —
+ * глубокое и упорядоченное. Чужие правила без записи в state не удаляются:
+ * ownership только свой.
  */
-function assessPermissions(
-  current: unknown,
-  desired: DesiredState,
-  state: HarnessState,
-  items: PlanItem[],
-  drift: string[],
-): void {
-  const target = "permissions"
-  const recorded = state.permissions?.sha
+function assessRuleArray(options: {
+  kind: "permissions" | "policies"
+  target: string
+  current: unknown
+  desiredRules: readonly PermissionRule[] | undefined
+  recorded: string | undefined
+  items: PlanItem[]
+  drift: string[]
+}): void {
+  const { kind, target, current, desiredRules, recorded, items, drift } = options
 
-  if (desired.permissions === undefined) {
+  if (desiredRules === undefined) {
     if (recorded !== undefined) {
-      items.push({ kind: "permissions", action: "remove", target, detail: "убран из манифеста" })
+      items.push({ kind, action: "remove", target, detail: "убран из манифеста" })
     }
     return
   }
 
-  const rules = desired.permissions
   if (current === undefined) {
     items.push({
-      kind: "permissions",
+      kind,
       action: "create",
       target,
-      detail: permissionsLabel(rules.length),
+      detail: rulesLabel(desiredRules.length),
       warn: recorded !== undefined ? "правила удалены — будут восстановлены" : undefined,
     })
     if (recorded !== undefined) drift.push(`${target}: правила удалены из конфига, будут восстановлены`)
     return
   }
-  if (deepEqual(current, rules)) {
-    items.push({ kind: "permissions", action: "unchanged", target })
+  if (deepEqual(current, desiredRules)) {
+    items.push({ kind, action: "unchanged", target })
     return
   }
 
   const userEdited = recorded !== undefined && sha256(stableStringify(current)) !== recorded
   items.push({
-    kind: "permissions",
+    kind,
     action: "update",
     target,
-    detail: describePermissionsChange(current, rules),
+    detail: describeRulesChange(current, desiredRules),
     warn:
       recorded === undefined
-        ? "в конфиге уже были permissions вне harness — будут заменены"
+        ? `в конфиге уже были ${target} вне harness — будут заменены`
         : userEdited
           ? "правился вне harness"
           : undefined,
   })
   if (userEdited) drift.push(`${target}: правился вне harness, apply перезапишет правила`)
+}
+
+/**
+ * Markdown-агенты: сравнение по каноническому содержимому файла.
+ * Файл, которого нет в state, считается чужим: при совпадении имени
+ * он будет перезаписан с предупреждением, без имени — не трогается.
+ */
+async function assessAgents(
+  desired: DesiredState,
+  state: HarnessState,
+  items: PlanItem[],
+  drift: string[],
+): Promise<void> {
+  const desiredNames = new Set(desired.agents.map((agent) => agent.name))
+
+  for (const agent of desired.agents) {
+    const target = `agent:${agent.name}`
+    const recorded = state.agents[agent.name]?.sha
+    const current = await readText(agent.file)
+
+    if (current === undefined) {
+      items.push({
+        kind: "agent",
+        action: "create",
+        target,
+        detail: agent.relativePath,
+        warn: recorded !== undefined ? "файл удалён — будет восстановлен" : undefined,
+      })
+      if (recorded !== undefined) drift.push(`${target}: файл удалён, будет восстановлен`)
+      continue
+    }
+
+    const normalized = normalizeAgentContent(current)
+    if (normalized === agent.content) {
+      items.push({ kind: "agent", action: "unchanged", target })
+      continue
+    }
+
+    const userEdited = recorded !== undefined && sha256(normalized) !== recorded
+    items.push({
+      kind: "agent",
+      action: "update",
+      target,
+      detail: agent.relativePath,
+      warn:
+        recorded === undefined
+          ? "файл уже был вне harness — будет заменён"
+          : userEdited
+            ? "правился вне harness"
+            : undefined,
+    })
+    if (userEdited) drift.push(`${target}: правился вне harness, apply перезапишет файл`)
+  }
+
+  for (const name of Object.keys(state.agents)) {
+    if (!desiredNames.has(name)) {
+      items.push({ kind: "agent", action: "remove", target: `agent:${name}`, detail: "убран из манифеста" })
+    }
+  }
 }
 
 /**
@@ -356,7 +437,15 @@ function stringifyShort(value: unknown): string {
 }
 
 function sortItems(a: PlanItem, b: PlanItem): number {
-  const kindOrder: Record<PlanItem["kind"], number> = { skill: 0, mcp: 1, permissions: 2, instructions: 3, config: 4 }
+  const kindOrder: Record<PlanItem["kind"], number> = {
+    skill: 0,
+    mcp: 1,
+    permissions: 2,
+    policies: 3,
+    agent: 4,
+    instructions: 5,
+    config: 6,
+  }
   const actionOrder: Record<PlanAction, number> = { create: 0, update: 1, remove: 2, unchanged: 3 }
   return (
     kindOrder[a.kind] - kindOrder[b.kind] ||

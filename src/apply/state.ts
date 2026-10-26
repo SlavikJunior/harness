@@ -34,6 +34,12 @@ export interface StateInstructions {
   blocks: Record<string, string>
 }
 
+export interface StateAgent {
+  /** sha256 каноничного markdown */
+  sha: string
+  at: string
+}
+
 export interface HarnessState {
   appliedAt: string
   /** ключи passthrough-конфига, записанные нам: dot-path → sha(value) */
@@ -43,8 +49,12 @@ export interface HarnessState {
   skills: Record<string, StateSkill>
   /** управляемые блоки инструкций */
   instructions: StateInstructions
+  /** markdown-агенты: имя → sha содержимого */
+  agents: Record<string, StateAgent>
   /** записанный массив permissions: sha(value) — порядок правил значим */
   permissions?: StatePermissions
+  /** записанный массив policies: sha(value) */
+  policies?: StatePermissions
 }
 
 export interface StatePermissions {
@@ -52,7 +62,14 @@ export interface StatePermissions {
 }
 
 export function emptyState(): HarnessState {
-  return { appliedAt: "", configKeys: {}, mcp: {}, skills: {}, instructions: { file: "", blocks: {} } }
+  return {
+    appliedAt: "",
+    configKeys: {},
+    mcp: {},
+    skills: {},
+    instructions: { file: "", blocks: {} },
+    agents: {},
+  }
 }
 
 export async function loadState(projectRoot: string): Promise<HarnessState> {
@@ -75,7 +92,11 @@ export async function loadState(projectRoot: string): Promise<HarnessState> {
       "удали файл состояния и повтори apply",
     )
   }
-  return { ...checked.data, instructions: checked.data.instructions ?? { file: "", blocks: {} } }
+  return {
+    ...checked.data,
+    instructions: checked.data.instructions ?? { file: "", blocks: {} },
+    agents: checked.data.agents ?? {},
+  }
 }
 
 export async function saveState(projectRoot: string, state: HarnessState): Promise<void> {
@@ -108,6 +129,9 @@ const stateSchema = z.object({
     .optional(),
   /* optional: state-файлы, созданные до появления permissions */
   permissions: z.object({ sha: z.string().min(1) }).optional(),
+  /* optional: state-файлы, созданные до появления policies и агентов */
+  policies: z.object({ sha: z.string().min(1) }).optional(),
+  agents: z.record(z.string(), z.object({ sha: z.string().min(1), at: z.string().min(1) })).optional(),
 })
 
 /** Хеш директории (для vendor-скиллов). */

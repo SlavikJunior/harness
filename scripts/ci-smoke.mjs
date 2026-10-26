@@ -60,6 +60,20 @@ permissions:
   - action: shell
     resource: "*"
     effect: ask
+policies:
+  - action: shell
+    resource: "sudo *"
+    effect: deny
+agents:
+  reviewer:
+    description: CI-ревью без правок
+    mode: subagent
+    permissions:
+      - action: edit
+        resource: "*"
+        effect: deny
+    body: |
+      Проверь изменения.
 instructions:
   blocks:
     ci: |
@@ -72,8 +86,8 @@ config:
   /* Первый план: всё создать, секретов нет */
   const firstPlan = JSON.parse(run(project, ["plan", "--json"], 0))
   if (firstPlan.blocked !== undefined) throw new Error(`план заблокирован: ${firstPlan.blocked}`)
-  if (firstPlan.summary.create < 5) {
-    throw new Error(`ожидалось ≥ 5 create, получено: ${JSON.stringify(firstPlan.summary)}`)
+  if (firstPlan.summary.create < 7) {
+    throw new Error(`ожидалось ≥ 7 create, получено: ${JSON.stringify(firstPlan.summary)}`)
   }
   if (firstPlan.secrets.length !== 0) throw new Error("в смоук-манифесте не должно быть секретов")
 
@@ -101,6 +115,14 @@ config:
   const config = JSON.parse(await fs.readFile(path.join(project, ".opencode", "opencode.jsonc"), "utf8"))
   if (!Array.isArray(config.permissions) || config.permissions.length !== 1) {
     throw new Error("permissions не записаны в конфиг")
+  }
+  if (!Array.isArray(config.policies) || config.policies.length !== 1) {
+    throw new Error("policies не записаны в конфиг")
+  }
+
+  const reviewer = await fs.readFile(path.join(project, ".opencode", "agents", "reviewer.md"), "utf8")
+  if (!reviewer.startsWith("---\ndescription: CI-ревью без правок")) {
+    throw new Error("markdown-агент не создан или frontmatter неверен")
   }
 
   const agents = await fs.readFile(path.join(project, "AGENTS.md"), "utf8")
