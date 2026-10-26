@@ -1,10 +1,11 @@
 export { loadManifest, validateManifestText, MANIFEST_PATH } from "./manifest/load.js"
-export { manifestSchema, type Manifest, type SkillEntry, type SkillMode, type MCPServer } from "./manifest/schema.js"
+export { manifestSchema, type Manifest, type SkillEntry, type SkillMode, type MCPServer, type PermissionRule } from "./manifest/schema.js"
 export { detectStacks, type DetectResult } from "./detect/index.js"
 export { buildCatalog, parseFrontmatter, scanMirror, ensureMirror, mirrorsRoot, sourcesFile, loadSources } from "./catalog/index.js"
 export { buildDesiredState, catalogRefs, SKILLS_DIR } from "./apply/desired.js"
 export { computePlan } from "./apply/plan.js"
 export { applyDesired } from "./apply/apply.js"
+export { createReferenceLink, normalizeLinkTarget, sameLinkTarget } from "./apply/link.js"
 export {
   DEFAULT_INSTRUCTIONS_FILE,
   canonicalInstructionsText,
