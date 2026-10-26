@@ -2,13 +2,20 @@ import type { DetectResult } from "../detect/index.js"
 
 /** Черновик манифеста по результатам детекции. Строки идут в harness.yaml напрямую. */
 
-export function draftManifest(detection: DetectResult): string {
+export function draftManifest(
+  detection: DetectResult,
+  options: { scope?: "project" | "global" } = {},
+): string {
   const stacks = detection.stacks.length
     ? detection.stacks.map((stack) => `${stack.title} (${stack.markers.join(", ")})`)
     : ["не определён — заполните секции вручную"]
+  const scopeNote =
+    options.scope === "global"
+      ? "# Глобальный харнесс: манифест и state — в ~/.config/harness, артефакты — в ~/.config/opencode.\n"
+      : ""
 
   return `# harness.yaml — декларативная настройка OpenCode-харнесса этого проекта.
-# Workflow: правишь манифест → harness plan (предпросмотр) → harness apply.
+${scopeNote}# Workflow: правишь манифест → harness plan (предпросмотр) → harness apply.
 # Доступные скиллы: harness skills list. Источники: ~/.config/harness/sources.yaml.
 
 # Заголовок версии. Сейчас только 1.

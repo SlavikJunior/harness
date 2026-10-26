@@ -85,7 +85,7 @@ export function printApplyOutcome(outcome: ApplyOutcome): void {
   }
   console.log("")
   for (const item of outcome.applied) console.log(line(item))
-  console.log(`${pc.green("✔")} применено пунктов: ${outcome.applied.length} · state: .harness/state.json`)
+  console.log(`${pc.green("✔")} применено пунктов: ${outcome.applied.length} · state: ${outcome.stateFile}`)
 }
 
 export function printDoctorChecks(checks: DoctorCheck[]): void {

@@ -4,7 +4,7 @@ import { HarnessError } from "../core/errors.js"
 import { copyDir, readText, sha256, writeTextAtomic } from "../core/fs.js"
 import { MANAGED_CONFIG_FILE } from "../manifest/file.js"
 import { ConfigEditor, SCHEMA_URL } from "./config.js"
-import { skillTargetDir } from "./desired.js"
+import { skillTargetDir, SKILLS_DIR } from "./desired.js"
 import type { DesiredState, PlanItem, PlanReport } from "./types.js"
 import { hashSkillDir, hashValue, saveState, type HarnessState, type StateSkill } from "./state.js"
 import type { SkillMode } from "../manifest/schema.js"
@@ -15,6 +15,7 @@ import {
 } from "./instructions.js"
 import { createReferenceLink } from "./link.js"
 import { agentFilePath } from "./agents.js"
+import { displayPath, scopeFrom, type ScopeInput } from "../scope.js"
 
 /** Исполнение плана: приводит проект к DesiredState (идемпотентно). */
 
@@ -22,6 +23,8 @@ export interface ApplyOutcome {
   /** изменённые пункты (create|update|remove) */
   applied: PlanItem[]
   dryRun: boolean
+  /** путь state-файла для сообщения (проект — относительный, global — `~/…`) */
+  stateFile: string
 }
 
 const GITIGNORE_LINE = ".harness/"
@@ -83,19 +86,21 @@ async function buildNextState(desired: DesiredState): Promise<HarnessState> {
 
 /** Конвергенция: исполняет план (create/update/remove) и фиксирует state. */
 export async function applyDesired(
-  projectRoot: string,
+  input: ScopeInput,
   desired: DesiredState,
   plan: PlanReport,
   state: HarnessState,
   options: { dryRun?: boolean } = {},
 ): Promise<ApplyOutcome> {
+  const scope = scopeFrom(input)
+  const stateFile = displayPath(scope, scope.stateFile)
   if (plan.blocked !== undefined) throw new HarnessError("Apply заблокирован", plan.blocked)
   if (options.dryRun === true) {
-    return { applied: plan.items.filter((item) => item.action !== "unchanged"), dryRun: true }
+    return { applied: plan.items.filter((item) => item.action !== "unchanged"), dryRun: true, stateFile }
   }
 
   /* Конфиг: $schema + passthrough + mcp.servers */
-  const managedFile = MANAGED_CONFIG_FILE(projectRoot)
+  const managedFile = MANAGED_CONFIG_FILE(scope)
   const editor = ConfigEditor.from(await readText(managedFile))
   let configChanged = editor.set(["$schema"], SCHEMA_URL)
 
@@ -131,14 +136,14 @@ export async function applyDesired(
   if (configChanged) await writeTextAtomic(managedFile, `${editor.currentText.trimEnd()}\n`)
 
   /* Инструкции: только управляемые блоки, пользовательский текст не трогается */
-  const instructionsFile = instructionsFilePath(projectRoot, desired.instructions.file)
+  const instructionsFile = instructionsFilePath(scope, desired.instructions.file)
   const desiredNames = new Set(desired.instructions.blocks.map((block) => block.name))
   const previousFile = state.instructions.file
   const instructionsText = await readText(instructionsFile)
 
   if (previousFile !== "" && previousFile !== desired.instructions.file) {
     /* Сменился файл инструкций: сначала убираем старые блоки из прежнего файла */
-    const previousPath = instructionsFilePath(projectRoot, previousFile)
+    const previousPath = instructionsFilePath(scope, previousFile)
     const previousText = await readText(previousPath)
     if (previousText !== undefined) {
       const cleaned = renderInstructionBlocks(previousText, [], Object.keys(state.instructions.blocks))
@@ -154,7 +159,7 @@ export async function applyDesired(
 
   /* Скиллы: установка из манифеста */
   for (const skill of desired.skills) {
-    const targetDir = skillTargetDir(projectRoot, skill)
+    const targetDir = skillTargetDir(scope, skill)
     if ((skill.entry.mode ?? "vendor") === "reference") {
       await fs.mkdir(path.dirname(targetDir), { recursive: true })
       await fs.rm(targetDir, { recursive: true, force: true })
@@ -167,7 +172,7 @@ export async function applyDesired(
   for (const item of plan.items) {
     if (item.action !== "remove" || !item.target.startsWith("skill:")) continue
     const installName = item.target.slice("skill:".length)
-    await fs.rm(path.join(projectRoot, ".opencode", "skills", installName), { recursive: true, force: true })
+    await fs.rm(path.join(SKILLS_DIR(scope), installName), { recursive: true, force: true })
   }
 
   /* Агенты: пишем только изменённые файлы, удаляем — только записанные в state */
@@ -182,12 +187,12 @@ export async function applyDesired(
   }
   for (const item of plan.items) {
     if (item.action !== "remove" || !item.target.startsWith("agent:")) continue
-    await fs.rm(agentFilePath(projectRoot, item.target.slice("agent:".length)), { force: true })
+    await fs.rm(agentFilePath(scope, item.target.slice("agent:".length)), { force: true })
   }
 
-  /* State + gitignore */
-  await ensureGitignore(projectRoot)
-  await saveState(projectRoot, await buildNextState(desired))
+  /* State + gitignore (gitignore — только для проекта) */
+  if (scope.kind === "project") await ensureGitignore(scope.root)
+  await saveState(scope, await buildNextState(desired))
 
-  return { applied: plan.items.filter((item) => item.action !== "unchanged"), dryRun: false }
+  return { applied: plan.items.filter((item) => item.action !== "unchanged"), dryRun: false, stateFile }
 }

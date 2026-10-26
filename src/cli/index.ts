@@ -18,6 +18,7 @@ program
   .name("harness")
   .description("Декларативная настройка OpenCode-харнесса проекта по манифесту harness.yaml")
   .version("0.1.0")
+  .option("--global", "работать с глобальным харнессом (~/.config/opencode, ~/.config/harness)")
 
 program.addCommand(initCommand)
 program.addCommand(planCommand)

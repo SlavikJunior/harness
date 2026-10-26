@@ -1,6 +1,7 @@
 import path from "node:path"
 import { stringify } from "yaml"
 import type { AgentDefinition } from "../manifest/schema.js"
+import { displayPath, scopeFrom, type ScopeInput } from "../scope.js"
 
 /**
  * Markdown-агенты: frontmatter + body → `.opencode/agents/<name>.md`.
@@ -10,16 +11,16 @@ import type { AgentDefinition } from "../manifest/schema.js"
  * Пользовательские агенты с другими именами не трогаются.
  */
 
-export function agentsDir(projectRoot: string): string {
-  return path.join(projectRoot, ".opencode", "agents")
+export function agentsDir(input: ScopeInput): string {
+  return scopeFrom(input).agentsDir
 }
 
-export function agentFilePath(projectRoot: string, name: string): string {
-  return path.join(agentsDir(projectRoot), `${name}.md`)
+export function agentFilePath(input: ScopeInput, name: string): string {
+  return path.join(agentsDir(input), `${name}.md`)
 }
 
-export function agentRelativePath(name: string): string {
-  return `.opencode/agents/${name}.md`
+export function agentRelativePath(input: ScopeInput, name: string): string {
+  return displayPath(scopeFrom(input), agentFilePath(input, name))
 }
 
 /** Единый вид для сравнения: LF и ровно один хвостовой перевод строки. */

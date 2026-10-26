@@ -6,10 +6,11 @@ import type { DesiredSkill, DesiredState } from "./types.js"
 import type { SkillEntry } from "../manifest/schema.js"
 import { DEFAULT_INSTRUCTIONS_FILE, type InstructionBlock } from "./instructions.js"
 import { agentFilePath, agentRelativePath, renderAgent } from "./agents.js"
+import { scopeFrom, type ScopeInput } from "../scope.js"
 
 /** Сборка DesiredState: манифест + каталог → что именно применить. */
 
-export const SKILLS_DIR = (projectRoot: string): string => path.join(projectRoot, ".opencode", "skills")
+export const SKILLS_DIR = (input: ScopeInput): string => scopeFrom(input).skillsDir
 
 function assertSafeName(value: string, field: string): void {
   if (value.includes("/") || value.includes("\\") || value.startsWith(".")) {
@@ -77,7 +78,7 @@ function resolveSkill(catalog: CatalogIndex, entry: SkillEntry): SkillItem {
 
 /** Манифест + каталог → DesiredState (чистая от ФС, кроме проверки имён). */
 export function buildDesiredState(
-  root: string,
+  input: ScopeInput,
   manifest: Manifest,
   catalog: CatalogIndex,
 ): DesiredState {
@@ -128,8 +129,8 @@ export function buildDesiredState(
       name,
       definition,
       content: renderAgent(definition),
-      file: agentFilePath(root, name),
-      relativePath: agentRelativePath(name),
+      file: agentFilePath(input, name),
+      relativePath: agentRelativePath(input, name),
     }))
     .toSorted((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
 
@@ -150,6 +151,6 @@ export function buildDesiredState(
 }
 
 /** Пути установки всех скиллов. */
-export function skillTargetDir(root: string, skill: DesiredSkill): string {
-  return path.join(SKILLS_DIR(root), skill.installName)
+export function skillTargetDir(input: ScopeInput, skill: DesiredSkill): string {
+  return path.join(SKILLS_DIR(input), skill.installName)
 }

@@ -7,6 +7,7 @@ import type { Manifest } from "../manifest/schema.js"
 import { scanManifest } from "../secrets/scan.js"
 import { ok, fail } from "../core/log.js"
 import { printSecretFindings } from "./print.js"
+import { resolveScope, scopeFrom, type ScopeInput } from "../scope.js"
 
 /** `harness add skill|mcp`: точечные правки манифеста (комментарии сохраняются). */
 
@@ -23,11 +24,15 @@ function parseKv(pairs: string[] | undefined, separator: string, what: string): 
   return result
 }
 
-async function editManifest(projectRoot: string, edit: (doc: Document) => void): Promise<Manifest> {
-  const file = MANIFEST_PATH(projectRoot)
+async function editManifest(input: ScopeInput, edit: (doc: Document) => void): Promise<Manifest> {
+  const scope = scopeFrom(input)
+  const file = MANIFEST_PATH(scope)
   const text = await readText(file)
   if (text === undefined) {
-    throw new HarnessError(`Манифест не найден: ${file}`, "Сначала: harness init")
+    throw new HarnessError(
+      `Манифест не найден: ${file}`,
+      `Сначала: harness${scope.kind === "global" ? " --global" : ""} init`,
+    )
   }
   const doc = parseDocument(text)
   edit(doc)
@@ -52,7 +57,8 @@ addCommand
   .description("Добавить скилл: harness add skill <source/name> [--mode vendor|reference]")
   .argument("<reference>", "источник и имя через слэш, например android-skills/navigation-3")
   .option("-m, --mode <mode>", "способ подключения", "vendor")
-  .action(async (reference: string, options: { mode?: string }) => {
+  .option("--global", "добавить в глобальный манифест (~/.config/harness/harness.yaml)")
+  .action(async (reference: string, options: { mode?: string; global?: boolean }, command: Command) => {
     const slash = reference.indexOf("/")
     if (slash <= 0 || slash === reference.length - 1) {
       fail(`Ожидался формат <source/name>, получено: "${reference}"`)
@@ -69,7 +75,8 @@ addCommand
     const entry: Record<string, string> = options.mode === "reference" ? { source, name, mode: "reference" } : { source, name }
 
     try {
-      const manifest = await editManifest(process.cwd(), (doc: Document) => {
+      const scope = await resolveScope(process.cwd(), { global: command.optsWithGlobals().global === true })
+      const manifest = await editManifest(scope, (doc: Document) => {
         const existing = doc.get("skills")
         if (existing !== undefined && existing !== null) {
           // дубликат — идемпотентность add
@@ -105,7 +112,8 @@ addCommand
   .option("--url <url>", "адрес remote-сервера")
   .option("--header <pair>", "заголовок remote: Name:value (повторяемо)", (value, previous: string[] = []) => [...previous, value])
   .option("--env <pair>", "environment local: KEY=value (повторяемо)", (value, previous: string[] = []) => [...previous, value])
-  .action(async (name: string, options: { local?: string[]; url?: string } & HeaderOption & { env?: string[] }) => {
+  .option("--global", "добавить в глобальный манифест (~/.config/harness/harness.yaml)")
+  .action(async (name: string, options: { local?: string[]; url?: string; global?: boolean } & HeaderOption & { env?: string[] }, cli: Command) => {
     try {
       const headers = parseKv((options as { header?: string[] }).header, ":", "--header")
       const environment = parseKv(options.env, "=", "--env")
@@ -125,7 +133,8 @@ addCommand
           ? { type: "local", command, ...(Object.keys(environment).length > 0 ? { environment } : {}) }
           : { type: "remote", url: options.url, ...(Object.keys(headers).length > 0 ? { headers } : {}) }
 
-      const manifest = await editManifest(process.cwd(), (doc) => {
+      const scope = await resolveScope(process.cwd(), { global: cli.optsWithGlobals().global === true })
+      const manifest = await editManifest(scope, (doc) => {
         doc.setIn(["mcp", name], doc.createNode(value))
       })
       ok(`Добавлен MCP-сервер: ${name}`)

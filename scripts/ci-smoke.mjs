@@ -4,7 +4,7 @@
  * doctor --strict → повторный plan. Проверяет ссылку reference-скилла
  * (на Windows — junction), permissions и управляемый блок AGENTS.md.
  */
-import { promises as fs } from "node:fs"
+import { existsSync, promises as fs } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { spawnSync } from "node:child_process"
@@ -127,6 +127,25 @@ config:
 
   const agents = await fs.readFile(path.join(project, "AGENTS.md"), "utf8")
   if (!agents.includes("<!-- harness:begin:ci -->")) throw new Error("блок AGENTS.md не создан")
+
+  /* Глобальный скоуп: init → apply → doctor в изолированном XDG */
+  const globalProject = path.join(temp, "global-project")
+  await fs.mkdir(globalProject, { recursive: true })
+  run(globalProject, ["--global", "init"], 0)
+  await fs.writeFile(
+    path.join(process.env.XDG_CONFIG_HOME, "harness", "harness.yaml"),
+    "version: 1\nconfig:\n  model: global/model\n",
+    "utf8",
+  )
+  run(globalProject, ["--global", "apply"], 0)
+  run(globalProject, ["--global", "doctor", "--strict"], 0)
+  const globalConfig = JSON.parse(
+    await fs.readFile(path.join(process.env.XDG_CONFIG_HOME, "opencode", "opencode.jsonc"), "utf8"),
+  )
+  if (globalConfig.model !== "global/model") throw new Error("глобальный конфиг не применён")
+  if (existsSync(path.join(globalProject, ".opencode"))) {
+    throw new Error("глобальный apply затронул проектный каталог")
+  }
 
   console.log("✔ CI smoke пройден")
 } finally {

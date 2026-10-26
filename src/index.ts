@@ -29,4 +29,14 @@ export {
 export { loadState, saveState, STATE_FILE } from "./apply/state.js"
 export { runDoctor } from "./verify/doctor.js"
 export { scanManifest, classifyValue, maskSecrets, maskText, SECRET_MASK, type SecretFinding, type SecretKind } from "./secrets/scan.js"
+export {
+  displayPath,
+  globalScope,
+  projectScope,
+  resolveScope,
+  scopeFrom,
+  type Scope,
+  type ScopeInput,
+  type ScopeKind,
+} from "./scope.js"
 export { MANAGED_CONFIG_FILE, MANIFEST_FILE, OPENCODE_CONFIG_DIR } from "./manifest/file.js"

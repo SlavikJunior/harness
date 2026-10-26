@@ -1,8 +1,8 @@
-import path from "node:path"
 import { parse, parseDocument, LineCounter, type Document } from "yaml"
 import { manifestSchema, reservedConfigKeys, type Manifest } from "./schema.js"
 import { ManifestValidationError, HarnessError } from "../core/errors.js"
 import { readText } from "../core/fs.js"
+import { scopeFrom, type ScopeInput } from "../scope.js"
 
 /**
  * Загрузка и валидация манифеста `harness.yaml` — единственного
@@ -15,7 +15,7 @@ import { readText } from "../core/fs.js"
 export { MANIFEST_FILE } from "./file.js"
 export type { Manifest, SkillEntry, SkillMode, MCPServer, MCPLocal, MCPRemote } from "./schema.js"
 
-export const MANIFEST_PATH = (projectRoot: string): string => path.join(projectRoot, "harness.yaml")
+export const MANIFEST_PATH = (input: ScopeInput): string => scopeFrom(input).manifestFile
 
 interface RawIssue {
   path: string
@@ -152,11 +152,17 @@ function checkSemantics(manifest: Manifest, text: string): void {
 }
 
 /** Загрузка манифеста с диска. */
-export async function loadManifest(projectRoot: string): Promise<Manifest> {
-  const file = MANIFEST_PATH(projectRoot)
+export async function loadManifest(input: ScopeInput): Promise<Manifest> {
+  const scope = scopeFrom(input)
+  const file = MANIFEST_PATH(scope)
   const text = await readText(file)
   if (text === undefined) {
-    throw new HarnessError(`Манифест не найден: ${file}`, "Сгенерировать черновик: harness init")
+    throw new HarnessError(
+      `Манифест не найден: ${file}`,
+      scope.kind === "global"
+        ? "Создать глобальный черновик: harness --global init"
+        : "Сгенерировать черновик: harness init",
+    )
   }
   return validateManifestText(text)
 }

@@ -1,5 +1,6 @@
 import path from "node:path"
 import type { InstructionsConfig } from "../manifest/schema.js"
+import { scopeFrom, type ScopeInput } from "../scope.js"
 
 /**
  * Управляемые блоки в файле инструкций проекта (по умолчанию AGENTS.md).
@@ -39,9 +40,9 @@ export interface ParsedInstructionBlocks {
   errors: string[]
 }
 
-/** Абсолютный путь к файлу инструкций (схема уже запрещает выход за проект). */
-export function instructionsFilePath(projectRoot: string, file: string): string {
-  return path.resolve(projectRoot, file)
+/** Абсолютный путь к файлу инструкций (схема уже запрещает выход за скоуп). */
+export function instructionsFilePath(input: ScopeInput, file: string): string {
+  return path.resolve(scopeFrom(input).instructionsBase, file)
 }
 
 /** Каноничное содержимое блока: LF, без крайних пустых строк. */

@@ -144,6 +144,36 @@ agents:
   чужие файлы с другими именами не трогаются;
 - одноимённый файл вне harness будет перезаписан с предупреждением в плане.
 
+## Глобальный скоуп
+
+`--global` переключает команды на пользовательский харнесс (флаг можно ставить
+до или после команды):
+
+```bash
+harness --global init
+harness --global plan
+harness --global apply
+harness --global doctor
+```
+
+| Что | Где |
+|---|---|
+| Манифест | `~/.config/harness/harness.yaml` |
+| State | `~/.config/harness/state.json` |
+| Конфиг | `~/.config/opencode/opencode.json(c)` |
+| Скиллы | `~/.config/opencode/skills/` |
+| Агенты | `~/.config/opencode/agents/` |
+| Инструкции | `~/.config/opencode/AGENTS.md` |
+
+- глобальный конфиг — личный файл пользователя: harness правит только свои
+  ключи (key-level ownership в state), остальное и комментарии сохраняются;
+  если уже есть `opencode.json`, второй `.jsonc` не создаётся;
+- глобальные `permissions`/`policies` перекрывают проектные: глобальный
+  `ask`/`deny` из проекта не отменить — `doctor` об этом предупреждает;
+- `.gitignore` и проверки конфликтов проектных конфигов к глобальному скоупу
+  не применяются;
+- `init --global` не детектит стек текущего каталога — черновик пустой.
+
 ## Источники скиллов
 
 Дефолтные: `android-skills` (github.com/android/skills), `alexgladkov`
@@ -264,7 +294,8 @@ npm run build           # tsc → dist/
 
 ## Ограничения MVP
 
-- Только project-scope (глобальный конфиг не управляется)
+- Project-scope: `.opencode/opencode.jsonc` целиком управляется harness;
+  в global-scope — только записанные ключи в `~/.config/opencode/opencode.json(c)`
 - `instructions` — один файл на проект (по умолчанию `AGENTS.md`); файл
   нормализуется к LF
 - `permissions` и `policies` управляются только на top-level; agent-level

@@ -1,7 +1,8 @@
+import { scopeFrom, type ScopeInput } from "../scope.js"
+
 export const MANIFEST_FILE = "harness.yaml"
 
-export const OPENCODE_CONFIG_DIR = (projectRoot: string): string => `${projectRoot}/.opencode`
+export const OPENCODE_CONFIG_DIR = (input: ScopeInput): string => scopeFrom(input).configDir
 
-/** Файл, которым владеет harness (пользовательский opencode.json не трогаем). */
-export const MANAGED_CONFIG_FILE = (projectRoot: string): string =>
-  `${projectRoot}/.opencode/opencode.jsonc`
+/** Управляемый конфиг: project — `.opencode/opencode.jsonc`, global — существующий `.json(c)`. */
+export const MANAGED_CONFIG_FILE = (input: ScopeInput): string => scopeFrom(input).configFile

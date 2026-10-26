@@ -1,8 +1,8 @@
-import path from "node:path"
 import { HarnessError } from "../core/errors.js"
 import { readText, sha256, sha256Dir, writeTextAtomic, copyDir } from "../core/fs.js"
 import { stableStringify } from "../core/hash.js"
 import type { SkillMode } from "../manifest/schema.js"
+import { scopeFrom, type ScopeInput } from "../scope.js"
 
 /**
  * State-файл применённого состояния: `.harness/state.json`.
@@ -10,8 +10,8 @@ import type { SkillMode } from "../manifest/schema.js"
  * и совпадает ли текущее содержимое артефактов с применённым (drift).
  */
 
-export const STATE_DIR = (projectRoot: string): string => path.join(projectRoot, ".harness")
-export const STATE_FILE = (projectRoot: string): string => path.join(STATE_DIR(projectRoot), "state.json")
+export const STATE_DIR = (input: ScopeInput): string => scopeFrom(input).harnessDir
+export const STATE_FILE = (input: ScopeInput): string => scopeFrom(input).stateFile
 
 export interface StateSkill {
   source: string
@@ -72,15 +72,15 @@ export function emptyState(): HarnessState {
   }
 }
 
-export async function loadState(projectRoot: string): Promise<HarnessState> {
-  const text = await readText(STATE_FILE(projectRoot))
+export async function loadState(input: ScopeInput): Promise<HarnessState> {
+  const text = await readText(STATE_FILE(input))
   if (text === undefined) return emptyState()
   let value: unknown
   try {
     value = JSON.parse(text)
   } catch {
     throw new HarnessError(
-      `Файл состояния повреждён: ${STATE_FILE(projectRoot)}`,
+      `Файл состояния повреждён: ${STATE_FILE(input)}`,
       "удали файл состояния и повтори apply",
     )
   }
@@ -88,7 +88,7 @@ export async function loadState(projectRoot: string): Promise<HarnessState> {
   if (!checked.success) {
     const detail = checked.error.issues[0]?.message ?? "неизвестная ошибка"
     throw new HarnessError(
-      `Файл состояния некорректен: ${STATE_FILE(projectRoot)} (${detail})`,
+      `Файл состояния некорректен: ${STATE_FILE(input)} (${detail})`,
       "удали файл состояния и повтори apply",
     )
   }
@@ -99,8 +99,8 @@ export async function loadState(projectRoot: string): Promise<HarnessState> {
   }
 }
 
-export async function saveState(projectRoot: string, state: HarnessState): Promise<void> {
-  await writeTextAtomic(STATE_FILE(projectRoot), `${JSON.stringify(state, null, 2)}\n`)
+export async function saveState(input: ScopeInput, state: HarnessState): Promise<void> {
+  await writeTextAtomic(STATE_FILE(input), `${JSON.stringify(state, null, 2)}\n`)
 }
 
 /* Схема state-файла (минимальная, для защиты от мусора) */

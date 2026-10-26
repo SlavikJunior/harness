@@ -19,6 +19,7 @@ import {
   parseInstructionBlocks,
 } from "./instructions.js"
 import { normalizeAgentContent } from "./agents.js"
+import { scopeFrom, type ScopeInput } from "../scope.js"
 
 /** Diff текущего состояния проекта против желаемого → PlanReport. */
 
@@ -43,15 +44,16 @@ function globalConfigFiles(): string[] {
 }
 
 export async function computePlan(
-  projectRoot: string,
+  input: ScopeInput,
   desired: DesiredState,
   state: HarnessState,
 ): Promise<PlanReport> {
   const items: PlanItem[] = []
   const drift: string[] = []
   const conflicts: string[] = []
+  const scope = scopeFrom(input)
 
-  const managedFile = MANAGED_CONFIG_FILE(projectRoot)
+  const managedFile = MANAGED_CONFIG_FILE(scope)
   const text = await readText(managedFile)
 
   if (text !== undefined) {
@@ -119,7 +121,7 @@ export async function computePlan(
   await assessAgents(desired, state, items, drift)
 
   /* Инструкции (AGENTS.md): управляемые блоки */
-  const instructionsBlocked = await assessInstructions(projectRoot, desired, state, items, drift)
+  const instructionsBlocked = await assessInstructions(scope, desired, state, items, drift)
   if (instructionsBlocked !== undefined) {
     return { items, drift, conflicts, blocked: instructionsBlocked }
   }
@@ -173,7 +175,7 @@ export async function computePlan(
 
   for (const skill of desired.skills) {
     items.push(
-      await assessSkill(skill.entry.mode ?? "vendor", skill, skillTargetDir(projectRoot, skill), state),
+      await assessSkill(skill.entry.mode ?? "vendor", skill, skillTargetDir(scope, skill), state),
     )
   }
   for (const installName of previousSkillNames) {
@@ -187,8 +189,8 @@ export async function computePlan(
     }
   }
 
-  /* Конфликты перекрытия пользовательских конфигов */
-  await scanConflicts(projectRoot, desired, conflicts)
+  /* Конфликты перекрытия пользовательских конфигов (только проектный скоуп) */
+  if (scope.kind === "project") await scanConflicts(scope.root, desired, conflicts)
 
   return { items: items.toSorted(sortItems), drift, conflicts }
 }
@@ -335,14 +337,14 @@ async function assessAgents(
  * Повреждённые маркеры блокируют apply, чтобы не перезаписать чужой текст.
  */
 async function assessInstructions(
-  projectRoot: string,
+  input: ScopeInput,
   desired: DesiredState,
   state: HarnessState,
   items: PlanItem[],
   drift: string[],
 ): Promise<string | undefined> {
   const relative = desired.instructions.file
-  const file = instructionsFilePath(projectRoot, relative)
+  const file = instructionsFilePath(input, relative)
   const text = await readText(file)
   const parsed = parseInstructionBlocks(text ?? "")
   if (parsed.errors.length > 0) {
@@ -355,7 +357,7 @@ async function assessInstructions(
 
   /* Смена файла: старые блоки будут убраны из прежнего файла */
   if (fileChanged) {
-    const previousText = await readText(instructionsFilePath(projectRoot, previousFile))
+    const previousText = await readText(instructionsFilePath(input, previousFile))
     if (previousText !== undefined) {
       const previousParsed = parseInstructionBlocks(previousText)
       if (previousParsed.errors.length > 0) {

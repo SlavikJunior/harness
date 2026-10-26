@@ -18,6 +18,7 @@ import {
 } from "../apply/instructions.js"
 import { findNodeAtLocation, parseTree, type JSONPath } from "jsonc-parser"
 import path from "node:path"
+import { displayPath, scopeFrom, type ScopeInput } from "../scope.js"
 
 /** `harness doctor`: фактическое состояние проекта против манифеста. */
 
@@ -41,8 +42,9 @@ function valueAt(jsoncText: string, jsonPath: JSONPath): unknown {
   }
 }
 
-export async function runDoctor(projectRoot: string, options: { live?: boolean } = {}): Promise<DoctorCheck[]> {
+export async function runDoctor(input: ScopeInput, options: { live?: boolean } = {}): Promise<DoctorCheck[]> {
   const checks: DoctorCheck[] = []
+  const scope = scopeFrom(input)
   const push = (level: CheckLevel, message: string): void => {
     checks.push({ level, message })
   }
@@ -50,7 +52,7 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
   /* Манифест */
   let manifest
   try {
-    manifest = await loadManifest(projectRoot)
+    manifest = await loadManifest(scope)
   } catch (error) {
     push("error", error instanceof Error ? error.message : String(error))
     return checks
@@ -72,13 +74,24 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
   try {
     const refs = catalogRefs(manifest)
     const catalog = await buildCatalog({ refs, sourceFilter: Object.keys(refs) })
-    desired = buildDesiredState(projectRoot, manifest, catalog)
+    desired = buildDesiredState(scope, manifest, catalog)
     if (desired.skills.length > 0) {
       push("ok", `скиллы разрешены: ${desired.skills.map((skill) => skill.installName).join(", ")}`)
     }
   } catch (error) {
     push("error", error instanceof Error ? error.message : String(error))
     return checks
+  }
+
+  /* Глобальный скоуп: артефакты живут в конфиге пользователя */
+  if (scope.kind === "global") {
+    push("ok", `глобальный скоуп: ${displayPath(scope, scope.configFile)}`)
+    if ((desired.permissions?.length ?? 0) > 0 || (desired.policies?.length ?? 0) > 0) {
+      push(
+        "warn",
+        "глобальные permissions/policies перекрывают проектные: проектный allow не отменит глобальный ask/deny",
+      )
+    }
   }
 
   /* Зеркала reference-скиллов существуют */
@@ -92,7 +105,7 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
   }
 
   /* Управляемый конфиг */
-  const managedFile = MANAGED_CONFIG_FILE(projectRoot)
+  const managedFile = MANAGED_CONFIG_FILE(scope)
   const text = await readText(managedFile)
   if (text === undefined) {
     push("warn", `${managedFile} не создан — запусти harness apply`)
@@ -171,7 +184,7 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
   /* Инструкции: маркеры блоков и пути/команды из inline-code */
   if (desired.instructions.blocks.length > 0) {
     const relative = desired.instructions.file
-    const instructionText = await readText(instructionsFilePath(projectRoot, relative))
+    const instructionText = await readText(instructionsFilePath(scope, relative))
     const parsed = parseInstructionBlocks(instructionText ?? "")
     if (parsed.errors.length > 0) {
       for (const error of parsed.errors) push("error", `${relative}: ${error}`)
@@ -179,7 +192,7 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
       push("warn", `${relative} не создан — запусти harness apply`)
     }
     for (const entry of extractInstructionPaths(desired.instructions.blocks)) {
-      if (await pathExists(path.resolve(projectRoot, entry))) {
+      if (await pathExists(path.resolve(scope.instructionsBase, entry))) {
         push("ok", `инструкции: путь "${entry}" существует`)
       } else {
         push("warn", `инструкции: путь "${entry}" не найден в проекте`)
@@ -190,7 +203,7 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
   /* Соответствие манифесту на живом state */
   let state
   try {
-    state = await loadState(projectRoot)
+    state = await loadState(scope)
   } catch (error) {
     push("error", error instanceof Error ? error.message : String(error))
     return checks
@@ -199,7 +212,7 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
     push("warn", "harness apply не выполнялся — состояние не применено")
   }
 
-  const plan = await computePlan(projectRoot, desired, state)
+  const plan = await computePlan(scope, desired, state)
   if (plan.blocked !== undefined) push("error", plan.blocked)
 
   const pending = plan.items.filter((item) => item.action !== "unchanged")
