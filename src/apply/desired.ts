@@ -4,6 +4,7 @@ import type { CatalogIndex, SkillItem } from "../catalog/types.js"
 import { HarnessError } from "../core/errors.js"
 import type { DesiredSkill, DesiredState } from "./types.js"
 import type { SkillEntry } from "../manifest/schema.js"
+import { DEFAULT_INSTRUCTIONS_FILE, type InstructionBlock } from "./instructions.js"
 
 /** Сборка DesiredState: манифест + каталог → что именно применить. */
 
@@ -81,6 +82,12 @@ export function buildDesiredState(
     config: { ...(manifest.config ?? {}) },
     mcpServers: { ...(manifest.mcp ?? {}) },
     skills,
+    instructions: {
+      file: manifest.instructions?.file ?? DEFAULT_INSTRUCTIONS_FILE,
+      blocks: (Object.entries(manifest.instructions?.blocks ?? {}) as [string, string][]).map(
+        ([name, content]): InstructionBlock => ({ name, content }),
+      ),
+    },
   }
 }
 

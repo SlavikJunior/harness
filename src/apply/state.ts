@@ -25,6 +25,13 @@ export interface StateSkill {
   at: string
 }
 
+export interface StateInstructions {
+  /** файл инструкций, которым управляет harness */
+  file: string
+  /** имя блока → sha256 каноничного содержимого */
+  blocks: Record<string, string>
+}
+
 export interface HarnessState {
   appliedAt: string
   /** ключи passthrough-конфига, записанные нам: dot-path → sha(value) */
@@ -32,10 +39,12 @@ export interface HarnessState {
   /** применённые mcp-серверы: имя → sha(value) */
   mcp: Record<string, string>
   skills: Record<string, StateSkill>
+  /** управляемые блоки инструкций */
+  instructions: StateInstructions
 }
 
 export function emptyState(): HarnessState {
-  return { appliedAt: "", configKeys: {}, mcp: {}, skills: {} }
+  return { appliedAt: "", configKeys: {}, mcp: {}, skills: {}, instructions: { file: "", blocks: {} } }
 }
 
 export async function loadState(projectRoot: string): Promise<HarnessState> {
@@ -58,7 +67,7 @@ export async function loadState(projectRoot: string): Promise<HarnessState> {
       "удали файл состояния и повтори apply",
     )
   }
-  return checked.data
+  return { ...checked.data, instructions: checked.data.instructions ?? { file: "", blocks: {} } }
 }
 
 export async function saveState(projectRoot: string, state: HarnessState): Promise<void> {
@@ -84,6 +93,10 @@ const stateSchema = z.object({
   configKeys: z.record(z.string(), z.string()),
   mcp: z.record(z.string(), z.string()),
   skills: z.record(z.string(), skillStateSchema),
+  /* optional: state-файлы, созданные до появления инструкций */
+  instructions: z
+    .object({ file: z.string(), blocks: z.record(z.string(), z.string()) })
+    .optional(),
 })
 
 /** Хеш директории (для vendor-скиллов). */

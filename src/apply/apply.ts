@@ -1,13 +1,18 @@
 import { promises as fs } from "node:fs"
 import path from "node:path"
 import { HarnessError } from "../core/errors.js"
-import { copyDir, readText, writeTextAtomic } from "../core/fs.js"
+import { copyDir, readText, sha256, writeTextAtomic } from "../core/fs.js"
 import { MANAGED_CONFIG_FILE } from "../manifest/file.js"
 import { ConfigEditor, SCHEMA_URL } from "./config.js"
 import { skillTargetDir } from "./desired.js"
 import type { DesiredState, PlanItem, PlanReport } from "./types.js"
 import { hashSkillDir, hashValue, saveState, type HarnessState, type StateSkill } from "./state.js"
 import type { SkillMode } from "../manifest/schema.js"
+import {
+  instructionsFilePath,
+  normalizeInstructionContent,
+  renderInstructionBlocks,
+} from "./instructions.js"
 
 /** Исполнение плана: приводит проект к DesiredState (идемпотентно). */
 
@@ -39,6 +44,15 @@ async function buildNextState(desired: DesiredState): Promise<HarnessState> {
     configKeys: {},
     mcp: {},
     skills: {},
+    instructions: {
+      file: desired.instructions.file,
+      blocks: Object.fromEntries(
+        desired.instructions.blocks.map((block) => [
+          block.name,
+          sha256(normalizeInstructionContent(block.content)),
+        ]),
+      ),
+    },
   }
   for (const [key, value] of Object.entries(desired.config)) state.configKeys[key] = hashValue(value)
   for (const [name, server] of Object.entries(desired.mcpServers)) state.mcp[name] = hashValue(server)
@@ -63,6 +77,7 @@ export async function applyDesired(
   projectRoot: string,
   desired: DesiredState,
   plan: PlanReport,
+  state: HarnessState,
   options: { dryRun?: boolean } = {},
 ): Promise<ApplyOutcome> {
   if (plan.blocked !== undefined) throw new HarnessError("Apply заблокирован", plan.blocked)
@@ -90,6 +105,28 @@ export async function applyDesired(
     }
   }
   if (configChanged) await writeTextAtomic(managedFile, `${editor.currentText.trimEnd()}\n`)
+
+  /* Инструкции: только управляемые блоки, пользовательский текст не трогается */
+  const instructionsFile = instructionsFilePath(projectRoot, desired.instructions.file)
+  const desiredNames = new Set(desired.instructions.blocks.map((block) => block.name))
+  const previousFile = state.instructions.file
+  const instructionsText = await readText(instructionsFile)
+
+  if (previousFile !== "" && previousFile !== desired.instructions.file) {
+    /* Сменился файл инструкций: сначала убираем старые блоки из прежнего файла */
+    const previousPath = instructionsFilePath(projectRoot, previousFile)
+    const previousText = await readText(previousPath)
+    if (previousText !== undefined) {
+      const cleaned = renderInstructionBlocks(previousText, [], Object.keys(state.instructions.blocks))
+      if (cleaned.changed) await writeTextAtomic(previousPath, cleaned.text)
+    }
+    const rendered = renderInstructionBlocks(instructionsText, desired.instructions.blocks)
+    if (rendered.changed) await writeTextAtomic(instructionsFile, rendered.text)
+  } else {
+    const remove = Object.keys(state.instructions.blocks).filter((name) => !desiredNames.has(name))
+    const rendered = renderInstructionBlocks(instructionsText, desired.instructions.blocks, remove)
+    if (rendered.changed) await writeTextAtomic(instructionsFile, rendered.text)
+  }
 
   /* Скиллы: установка из манифеста */
   for (const skill of desired.skills) {

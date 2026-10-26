@@ -34,6 +34,21 @@ skills: []
 # Секреты — только через {env:VAR}: не пиши значения в файл.
 mcp: {}
 
+# Инструкции: управляемые блоки в AGENTS.md. Пиши конкретные команды и пути,
+# а не пожелания — doctor проверит, что пути из \`inline-code\` существуют.
+# Всё, что вне блоков <!-- harness:begin:NAME -->, не трогается.
+# Пример:
+#   instructions:
+#     file: AGENTS.md
+#     blocks:
+#       build: |
+#         Сборка: \`./gradlew assembleDebug\`, тесты: \`./gradlew test\`.
+#       versions: |
+#         Версии зависимостей — только из \`gradle/libs.versions.toml\`.
+#         Новые зависимости добавляем после явного согласования.
+instructions:
+  blocks: {}
+
 # Passthrough: значения пишутся как top-level поля .opencode/opencode.jsonc.
 # Ключи skills, mcp, permissions, policies задавать здесь нельзя.
 # Пример:

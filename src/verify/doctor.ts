@@ -8,7 +8,13 @@ import { computePlan } from "../apply/plan.js"
 import { loadState } from "../apply/state.js"
 import { validateJsoncText } from "../apply/config.js"
 import { scanManifest } from "../secrets/scan.js"
+import {
+  extractInstructionPaths,
+  instructionsFilePath,
+  parseInstructionBlocks,
+} from "../apply/instructions.js"
 import { findNodeAtLocation, parseTree, type JSONPath } from "jsonc-parser"
+import path from "node:path"
 
 /** `harness doctor`: фактическое состояние проекта против манифеста. */
 
@@ -95,6 +101,25 @@ export async function runDoctor(projectRoot: string, options: { live?: boolean }
     const result = await run("which", [binary])
     if (result.code === 0) push("ok", `mcp ${name}: бинарник "${binary}" найден`)
     else push("warn", `mcp ${name}: бинарник "${binary}" не найден в PATH`)
+  }
+
+  /* Инструкции: маркеры блоков и пути/команды из inline-code */
+  if (desired.instructions.blocks.length > 0) {
+    const relative = desired.instructions.file
+    const instructionText = await readText(instructionsFilePath(projectRoot, relative))
+    const parsed = parseInstructionBlocks(instructionText ?? "")
+    if (parsed.errors.length > 0) {
+      for (const error of parsed.errors) push("error", `${relative}: ${error}`)
+    } else if (instructionText === undefined) {
+      push("warn", `${relative} не создан — запусти harness apply`)
+    }
+    for (const entry of extractInstructionPaths(desired.instructions.blocks)) {
+      if (await pathExists(path.resolve(projectRoot, entry))) {
+        push("ok", `инструкции: путь "${entry}" существует`)
+      } else {
+        push("warn", `инструкции: путь "${entry}" не найден в проекте`)
+      }
+    }
   }
 
   /* Соответствие манифесту на живом state */

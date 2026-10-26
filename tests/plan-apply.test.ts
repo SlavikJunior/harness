@@ -88,7 +88,7 @@ describe("plan/apply e2e", () => {
     expect(plan1.blocked).toBeUndefined()
 
     /* Apply */
-    const outcome = await applyDesired(project, desired, plan1)
+    const outcome = await applyDesired(project, desired, plan1, emptyState())
     expect(outcome.dryRun).toBe(false)
     expect(outcome.applied).toHaveLength(creates.length)
 
@@ -126,7 +126,7 @@ describe("plan/apply e2e", () => {
     const desired = buildDesiredState(project, manifest, catalog)
     const plan = await computePlan(project, desired, emptyState())
 
-    const outcome = await applyDesired(project, desired, plan, { dryRun: true })
+    const outcome = await applyDesired(project, desired, plan, emptyState(), { dryRun: true })
     expect(outcome.dryRun).toBe(true)
     await expect(fs.access(path.join(project, ".opencode"))).rejects.toThrow()
   })
@@ -136,7 +136,8 @@ describe("plan/apply e2e", () => {
     const manifest = validateManifestText(await fs.readFile(path.join(project, "harness.yaml"), "utf8"))
     const catalog = await buildCatalog({ sourceFilter: ["test-local"] })
     const desired = buildDesiredState(project, manifest, catalog)
-    await applyDesired(project, desired, await computePlan(project, desired, emptyState()))
+    const initialState = emptyState()
+    await applyDesired(project, desired, await computePlan(project, desired, initialState), initialState)
 
     /* Ручная правка управляемого конфига → drift */
     const managedFile = MANAGED_CONFIG_FILE(project)
@@ -148,7 +149,7 @@ describe("plan/apply e2e", () => {
     expect(driftPlan.drift.some((entry) => entry.includes("config:model"))).toBe(true)
 
     /* Повторный apply конвергентен: возвращает значение манифеста */
-    await applyDesired(project, desired, driftPlan)
+    await applyDesired(project, desired, driftPlan, state)
     expect(await fs.readFile(managedFile, "utf8")).toContain("test/model")
 
     /* Скилл удалён из манифеста → remove по плану и на диске */
@@ -159,11 +160,12 @@ describe("plan/apply e2e", () => {
     )
     const manifest2 = validateManifestText(await fs.readFile(path.join(project, "harness.yaml"), "utf8"))
     const desired2 = buildDesiredState(project, manifest2, await buildCatalog({ sourceFilter: ["test-local"] }))
-    const removePlan = await computePlan(project, desired2, await loadState(project))
+    const state2 = await loadState(project)
+    const removePlan = await computePlan(project, desired2, state2)
     const removals = removePlan.items.filter((item) => item.action === "remove").map((item) => item.target)
     expect(removals).toContain("skill:demo2")
 
-    await applyDesired(project, desired2, removePlan)
+    await applyDesired(project, desired2, removePlan, state2)
     await expect(fs.lstat(path.join(project, ".opencode", "skills", "demo2"))).rejects.toThrow()
     expect(await fs.lstat(path.join(project, ".opencode", "skills", "demo"))).toBeTruthy()
   })

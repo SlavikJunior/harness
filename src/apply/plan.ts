@@ -12,6 +12,11 @@ import type { DesiredState } from "./types.js"
 import type { HarnessState, StateSkill } from "./state.js"
 import type { PlanAction, PlanItem, PlanReport } from "./types.js"
 import { maskSecrets, maskText } from "../secrets/scan.js"
+import {
+  instructionsFilePath,
+  normalizeInstructionContent,
+  parseInstructionBlocks,
+} from "./instructions.js"
 
 /** Diff текущего состояния проекта против желаемого → PlanReport. */
 
@@ -88,6 +93,12 @@ export async function computePlan(
     }
   }
 
+  /* Инструкции (AGENTS.md): управляемые блоки */
+  const instructionsBlocked = await assessInstructions(projectRoot, desired, state, items, drift)
+  if (instructionsBlocked !== undefined) {
+    return { items, drift, conflicts, blocked: instructionsBlocked }
+  }
+
   /* MCP-серверы (штучно: deep-merge OpenCode сохраняет чужие серверы) */
   const desiredMcpEntries = Object.entries(desired.mcpServers)
   const previousMcpNames = Object.keys(state.mcp)
@@ -157,6 +168,101 @@ export async function computePlan(
   return { items: items.toSorted(sortItems), drift, conflicts }
 }
 
+/**
+ * Оценка управляемых блоков инструкций: create/update/remove + drift.
+ * Повреждённые маркеры блокируют apply, чтобы не перезаписать чужой текст.
+ */
+async function assessInstructions(
+  projectRoot: string,
+  desired: DesiredState,
+  state: HarnessState,
+  items: PlanItem[],
+  drift: string[],
+): Promise<string | undefined> {
+  const relative = desired.instructions.file
+  const file = instructionsFilePath(projectRoot, relative)
+  const text = await readText(file)
+  const parsed = parseInstructionBlocks(text ?? "")
+  if (parsed.errors.length > 0) {
+    return `${relative}: повреждены маркеры блоков (${parsed.errors.join("; ")})`
+  }
+
+  const recorded = state.instructions.blocks
+  const previousFile = state.instructions.file
+  const fileChanged = previousFile !== "" && previousFile !== relative
+
+  /* Смена файла: старые блоки будут убраны из прежнего файла */
+  if (fileChanged) {
+    const previousText = await readText(instructionsFilePath(projectRoot, previousFile))
+    if (previousText !== undefined) {
+      const previousParsed = parseInstructionBlocks(previousText)
+      if (previousParsed.errors.length > 0) {
+        drift.push(`instructions: ${previousFile}: повреждены маркеры — старые блоки не будут удалены`)
+      } else {
+        for (const name of Object.keys(recorded)) {
+          if (!previousParsed.blocks.has(name)) continue
+          items.push({
+            kind: "instructions",
+            action: "remove",
+            target: `instructions:${name}`,
+            detail: `из ${previousFile} (файл сменился на ${relative})`,
+          })
+        }
+      }
+    }
+  }
+
+  for (const block of desired.instructions.blocks) {
+    const target = `instructions:${block.name}`
+    const current = parsed.blocks.get(block.name)
+
+    if (current === undefined) {
+      const restored = !fileChanged && recorded[block.name] !== undefined
+      items.push({
+        kind: "instructions",
+        action: "create",
+        target,
+        detail: `→ ${relative}`,
+        warn: restored ? "блок удалён — будет восстановлен" : undefined,
+      })
+      if (restored) drift.push(`${target}: блок удалён из ${relative}, будет восстановлен`)
+      continue
+    }
+
+    if (current === normalizeInstructionContent(block.content)) {
+      items.push({ kind: "instructions", action: "unchanged", target })
+      continue
+    }
+
+    const recordedHash = recorded[block.name]
+    const userEdited =
+      !fileChanged && recordedHash !== undefined && recordedHash !== sha256(current)
+    items.push({
+      kind: "instructions",
+      action: "update",
+      target,
+      detail: `→ ${relative}`,
+      warn: userEdited ? "правился вне harness" : undefined,
+    })
+    if (userEdited) drift.push(`${target}: правился вне harness, apply перезапишет блок`)
+  }
+
+  if (!fileChanged) {
+    const desiredNames = new Set(desired.instructions.blocks.map((block) => block.name))
+    for (const name of Object.keys(recorded)) {
+      if (desiredNames.has(name) || !parsed.blocks.has(name)) continue
+      items.push({
+        kind: "instructions",
+        action: "remove",
+        target: `instructions:${name}`,
+        detail: "убран из манифеста",
+      })
+    }
+  }
+
+  return undefined
+}
+
 function describeServer(server: { type: string; command?: string[]; url?: string }): string {
   return server.type === "local"
     ? `local: ${(server.command ?? []).map((argument) => maskText(argument)).join(" ")}`
@@ -169,7 +275,7 @@ function stringifyShort(value: unknown): string {
 }
 
 function sortItems(a: PlanItem, b: PlanItem): number {
-  const kindOrder: Record<PlanItem["kind"], number> = { skill: 0, mcp: 1, config: 2 }
+  const kindOrder: Record<PlanItem["kind"], number> = { skill: 0, mcp: 1, instructions: 2, config: 3 }
   const actionOrder: Record<PlanAction, number> = { create: 0, update: 1, remove: 2, unchanged: 3 }
   return (
     kindOrder[a.kind] - kindOrder[b.kind] ||

@@ -25,7 +25,7 @@ export const applyCommand = new Command("apply")
     if (plan.drift.length > 0) {
       for (const entry of plan.drift) warn(entry)
     }
-    const outcome = await applyDesired(projectRoot, desired, plan, { dryRun: options.dryRun })
+    const outcome = await applyDesired(projectRoot, desired, plan, state, { dryRun: options.dryRun })
     printApplyOutcome(outcome)
     if (outcome.dryRun) {
       ok("Это был dry-run. Реальное применение: harness apply")
