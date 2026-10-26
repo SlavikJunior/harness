@@ -1,0 +1,90 @@
+import path from "node:path"
+import type { Manifest } from "../manifest/load.js"
+import type { CatalogIndex, SkillItem } from "../catalog/types.js"
+import { HarnessError } from "../core/errors.js"
+import type { DesiredSkill, DesiredState } from "./types.js"
+import type { SkillEntry } from "../manifest/schema.js"
+
+/** Сборка DesiredState: манифест + каталог → что именно применить. */
+
+export const SKILLS_DIR = (projectRoot: string): string => path.join(projectRoot, ".opencode", "skills")
+
+function assertSafeName(value: string, field: string): void {
+  if (value.includes("/") || value.includes("\\") || value.startsWith(".")) {
+    throw new HarnessError(`Недопустимое имя: ${field}="${value}"`)
+  }
+}
+
+/**
+ * Имя директории установки. Если один и тот же name встречается у
+ * нескольких источников — всем таким скиллам добавляется префикс источника,
+ * чтобы выбор был детерминированным и не зависел от порядка в манифесте.
+ */
+export function installNames(entries: SkillEntry[]): Map<number, string> {
+  const sourcesPerName = new Map<string, Set<string>>()
+  for (const entry of entries) {
+    const set = sourcesPerName.get(entry.name) ?? new Set<string>()
+    set.add(entry.source)
+    sourcesPerName.set(entry.name, set)
+  }
+  const result = new Map<number, string>()
+  entries.forEach((entry, index) => {
+    const ambiguous = (sourcesPerName.get(entry.name)?.size ?? 0) > 1
+    result.set(index, ambiguous ? `${entry.source}-${entry.name}` : entry.name)
+  })
+  return result
+}
+
+function resolveSkill(catalog: CatalogIndex, entry: SkillEntry): SkillItem {
+  const candidates = catalog.skills.filter((item) => item.source === entry.source)
+  if (candidates.length === 0) {
+    throw new HarnessError(
+      `Скилл ${entry.name}: источник "${entry.source}" не найден или пуст`,
+      "Список источников: harness skills list",
+    )
+  }
+  const exact = candidates.find((item) => item.name === entry.name)
+  if (exact !== undefined) return exact
+  const similar = candidates
+    .filter((item) => item.name.includes(entry.name) || entry.name.includes(item.name))
+    .slice(0, 5)
+    .map((item) => `${item.name} (${item.relDir})`)
+  const shown = similar.length > 0 ? `Похожие в "${entry.source}": ${similar.join(", ")}` : `Доступно в "${entry.source}": ${candidates.slice(0, 8).map((item) => item.name).join(", ")}`
+  throw new HarnessError(`Скилл ${entry.name} не найден в источнике "${entry.source}"`, shown)
+}
+
+/** Манифест + каталог → DesiredState (чистая от ФС, кроме проверки имён). */
+export function buildDesiredState(
+  root: string,
+  manifest: Manifest,
+  catalog: CatalogIndex,
+): DesiredState {
+  const entries = manifest.skills ?? []
+  entries.forEach((entry) => {
+    assertSafeName(entry.name, "name")
+    assertSafeName(entry.source, "source")
+  })
+  const names = installNames(entries)
+
+  const skills: DesiredSkill[] = entries.map((entry, index) => {
+    const item = resolveSkill(catalog, entry)
+    return {
+      entry,
+      installName: names.get(index) as string,
+      sourceDir: item.dir,
+      sourceRef: item.ref,
+      item,
+    }
+  })
+
+  return {
+    config: { ...(manifest.config ?? {}) },
+    mcpServers: { ...(manifest.mcp ?? {}) },
+    skills,
+  }
+}
+
+/** Пути установки всех скиллов. */
+export function skillTargetDir(root: string, skill: DesiredSkill): string {
+  return path.join(SKILLS_DIR(root), skill.installName)
+}
