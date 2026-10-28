@@ -136,6 +136,7 @@ harness codex export --json             # машиночитаемо
 harness codex export --strict           # exit 1 при approximate/skipped/conflict
 harness codex export --force            # перезаписать чужое/изменённое (с backup)
 harness codex export --manifest-only    # не добавлять live-only артефакты OpenCode
+harness codex export --allow-mcp-secret-args # MCP с секретом в args через sh -c
 harness codex undo [--global|--all]     # откатить последний export
 ```
 
@@ -158,6 +159,9 @@ Codex всё равно живут в `~/.agents/skills` — это отдель
   `env_http_headers`, статические → `http_headers`;
 - если `npx`-MCP не успевают появиться в сессии, Codex по умолчанию ждёт их
   только 1 секунду: добавь в `config.toml` `mcp_optional_startup_grace_ms = 0`;
+- MCP с секретом в аргументах переносится только с `--allow-mcp-secret-args`:
+  `{env:VAR}` → `sh -c` + `env_vars`, литеральный секрет → `sh -c` с
+  предупреждением (значение попадёт в `config.toml` открытым текстом);
 - агенты: `developer_instructions` из body; `mode`, `permissions` и
   OpenCode-модель не переносятся — это видно в отчёте;
 - инструкции: переносятся `AGENTS.md` и **все файлы из `instructions`**

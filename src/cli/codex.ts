@@ -18,6 +18,7 @@ interface ExportOptions {
   strict?: boolean
   force?: boolean
   manifestOnly?: boolean
+  allowMcpSecretArgs?: boolean
 }
 
 function validateScopeOptions(options: { global?: boolean; all?: boolean }): void {
@@ -59,6 +60,10 @@ codexCommand
   .option("--strict", "exit 1 при approximate/skipped/conflict")
   .option("--force", "перезаписать чужие/изменённые Codex-артефакты (с backup)")
   .option("--manifest-only", "не добавлять артефакты, которых нет в harness.yaml")
+  .option(
+    "--allow-mcp-secret-args",
+    "разрешить sh -c-обёртку для MCP с секретами в аргументах (литеральные секреты попадут в config.toml)",
+  )
   .action(async (options: ExportOptions, command: Command) => {
     const global = command.optsWithGlobals().global === true
     const cwd = process.cwd()
@@ -83,6 +88,7 @@ codexCommand
             ...(options.dryRun === true ? { dryRun: true } : {}),
             ...(options.force === true ? { force: true } : {}),
             ...(options.manifestOnly === true ? { manifestOnly: true } : {}),
+            ...(options.allowMcpSecretArgs === true ? { allowMcpSecretArgs: true } : {}),
           }),
         )
       } catch (error) {

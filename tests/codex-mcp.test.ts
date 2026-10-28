@@ -31,6 +31,37 @@ describe("mapMcpServer", () => {
     expect(result.message).toContain("флаг секрета")
   })
 
+  it("local: gns3 с литеральным паролем → sh -c при --allow-mcp-secret-args", () => {
+    const result = mapMcpServer(
+      "gns3",
+      {
+        type: "local",
+        command: ["uvx", "gns3-mcp", "--host", "192.168.64.3", "--password", "admin"],
+      },
+      { allowSecretArgs: true },
+    )
+    expect(result.status).toBe("approximate")
+    expect(result.value).toMatchObject({ command: "sh" })
+    expect((result.value?.args as string[])[1]).toContain("'--password' 'admin'")
+  })
+
+  it("local: context7 с env-ключом в аргументах → sh -c и env_vars", () => {
+    const result = mapMcpServer(
+      "context7",
+      {
+        type: "local",
+        command: ["npx", "-y", "@upstash/context7-mcp", "--api-key", "{env:CONTEXT7_API_KEY}"],
+      },
+      { allowSecretArgs: true },
+    )
+    expect(result.status).toBe("approximate")
+    expect(result.value).toMatchObject({
+      command: "sh",
+      env_vars: ["CONTEXT7_API_KEY"],
+    })
+    expect((result.value?.args as string[])[1]).toContain('\'--api-key\' "$CONTEXT7_API_KEY"')
+  })
+
   it("local: смешанная подстановка, {file:...} и секрет в аргументах → skip", () => {
     expect(
       mapMcpServer("x", {

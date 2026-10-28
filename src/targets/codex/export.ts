@@ -43,6 +43,8 @@ export interface CodexExportOptions {
   dryRun?: boolean
   force?: boolean
   manifestOnly?: boolean
+  /** разрешить sh -c-обёртку для MCP с секретами в аргументах */
+  allowMcpSecretArgs?: boolean
   environment?: CodexEnvironment
 }
 
@@ -533,7 +535,7 @@ async function planMcp(
   nextState: CodexState,
   items: CodexItem[],
   actions: CodexAction[],
-  options: { force: boolean },
+  options: { force: boolean; allowMcpSecretArgs?: boolean },
   environment: CodexEnvironment,
   errors: string[],
 ): Promise<void> {
@@ -552,7 +554,7 @@ async function planMcp(
   const append: Record<string, Record<string, unknown>> = {}
 
   for (const [name, server] of Object.entries(desired.mcp)) {
-    const mapped = mapMcpServer(name, server)
+    const mapped = mapMcpServer(name, server, { allowSecretArgs: options.allowMcpSecretArgs === true })
     if (mapped.value === undefined) {
       addItem(items, "mcp", name, "skipped", mapped.message ?? "не удалось смаппить MCP")
       continue
@@ -731,7 +733,7 @@ export async function exportCodex(scope: Scope, options: CodexExportOptions = {}
     nextState,
     items,
     actions,
-    { force: options.force === true },
+    { force: options.force === true, allowMcpSecretArgs: options.allowMcpSecretArgs === true },
     environment,
     errors,
   )
