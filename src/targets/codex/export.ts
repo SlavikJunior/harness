@@ -8,6 +8,7 @@ import {
   normalizeInstructionContent,
   parseInstructionBlocks,
   renderInstructionBlocks,
+  type InstructionBlock,
 } from "../../apply/instructions.js"
 import type { SkillMode } from "../../manifest/schema.js"
 import type { Scope } from "../../scope.js"
@@ -326,6 +327,18 @@ function blockHashes(blocks: { name: string; content: string }[]): Record<string
   return Object.fromEntries(blocks.map((block) => [block.name, hashText(normalizeInstructionContent(block.content))]))
 }
 
+/** Имя managed-блока для файла инструкций: `opencode-AGENTS.md`. */
+function sourceBlockName(file: string, used: Set<string>): string {
+  const base = path.basename(file).replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "instructions"
+  let name = `opencode-${base}`
+  let index = 2
+  while (used.has(name)) {
+    name = `opencode-${base}-${index}`
+    index += 1
+  }
+  return name
+}
+
 async function planInstructions(
   scope: Scope,
   desired: CodexDesired,
@@ -337,17 +350,6 @@ async function planInstructions(
   environment: CodexEnvironment,
 ): Promise<void> {
   const instruction = desired.instructions
-  const blocks = instruction.blocks.filter((block) => {
-    if (classifyValue(block.name, block.content) === undefined) return true
-    addItem(
-      items,
-      "instructions",
-      block.name,
-      "skipped",
-      "блок инструкций похож на плейнтекст-секрет — не переношу автоматически",
-    )
-    return false
-  })
   const target = instruction.targetFile
   const current = await readText(target)
   const targetDisplay = displayCodexPath(scope, target, environment)
@@ -360,12 +362,6 @@ async function planInstructions(
       "approximate",
       "Codex предпочтёт AGENTS.override.md — managed-блоки в AGENTS.md могут не загрузиться",
     )
-  }
-
-  if (instruction.mode === "shared") {
-    addItem(items, "instructions", "AGENTS.md", "mapped", "общий файл с OpenCode; копировать не нужно", targetDisplay)
-    delete nextState.instructions
-    return
   }
 
   if (instruction.mode === "none") {
@@ -395,47 +391,72 @@ async function planInstructions(
     return
   }
 
-  if (instruction.mode === "copy") {
-    if (instruction.sourceText === undefined) {
-      addItem(items, "instructions", "AGENTS.md", "skipped", "исходный файл инструкций пуст или не найден")
-      return
-    }
-    if (classifyValue(undefined, instruction.sourceText) !== undefined) {
-      addItem(
-        items,
-        "instructions",
-        "AGENTS.md",
-        "skipped",
-        "файл инструкций похож на плейнтекст-секрет — полную копию не делаю",
-      )
-      return
-    }
-    const content = instruction.sourceText.endsWith("\n") ? instruction.sourceText : `${instruction.sourceText}\n`
-    if (Buffer.byteLength(content, "utf8") > 32 * 1024) {
-      addItem(
-        items,
-        "instructions",
-        "AGENTS.md",
-        "approximate",
-        "инструкции больше 32 KiB: Codex обрежет их без увеличения project_doc_max_bytes",
-      )
-    }
-    actions.push({ kind: "write", target, content })
-    addItem(items, "instructions", "AGENTS.md", "mapped", "полная копия инструкций OpenCode", targetDisplay)
-    const copiedBlocks = parseInstructionBlocks(content)
-    nextState.instructions = {
-      file: target,
-      fullCopy: true,
-      hash: hashText(content),
-      blocks: blockHashes([...copiedBlocks.blocks].map(([name, body]) => ({ name, content: body }))),
-    }
-    return
+  /* Все файлы инструкций становятся managed-блоками. Это позволяет
+     обновлять их по отдельности и не терять пользовательский текст. */
+  const previous = state.instructions
+  const desiredBlocks: InstructionBlock[] = []
+  const usedNames = new Set<string>()
+  const addDesiredBlock = (name: string, content: string): void => {
+    if (usedNames.has(name)) return
+    const normalized = normalizeInstructionContent(content)
+    if (normalized === "") return
+    usedNames.add(name)
+    desiredBlocks.push({ name, content: normalized })
   }
 
-  /* managed */
-  const previous = state.instructions
-  if (previous?.fullCopy === true && current !== undefined) {
-    if (hashText(current) !== previous.hash && !options.force) {
+  for (const block of instruction.blocks) {
+    if (classifyValue(block.name, block.content) !== undefined) {
+      addItem(
+        items,
+        "instructions",
+        block.name,
+        "skipped",
+        "блок инструкций похож на плейнтекст-секрет — не переношу автоматически",
+      )
+      continue
+    }
+    addDesiredBlock(block.name, block.content)
+  }
+
+  const primary = instruction.primaryFile === undefined ? undefined : path.resolve(instruction.primaryFile)
+  const primaryIsTarget = primary !== undefined && primary === path.resolve(target)
+  for (const source of instruction.sources) {
+    const sourceDisplay = displayCodexPath(scope, source.file, environment)
+    /* Проектный AGENTS.md уже лежит в целевом файле — копировать его в блок нельзя. */
+    if (primaryIsTarget && path.resolve(source.file) === primary) continue
+    if (classifyValue(undefined, source.text) !== undefined) {
+      addItem(
+        items,
+        "instructions",
+        path.basename(source.file),
+        "skipped",
+        `файл похож на плейнтекст-секрет: ${sourceDisplay}`,
+      )
+      continue
+    }
+    const parsedSource = parseInstructionBlocks(source.text)
+    if (parsedSource.errors.length > 0) {
+      addItem(
+        items,
+        "instructions",
+        path.basename(source.file),
+        "skipped",
+        `повреждены managed-маркеры: ${parsedSource.errors[0]}`,
+      )
+      continue
+    }
+    const extracted = [...parsedSource.blocks.entries()]
+    const body = extracted.length === 0
+      ? source.text
+      : renderInstructionBlocks(source.text, [], extracted.map(([name]) => name)).text
+    addDesiredBlock(sourceBlockName(source.file, usedNames), body)
+    for (const [name, content] of extracted) addDesiredBlock(name, content)
+  }
+
+  const blocks = desiredBlocks
+  let base = current ?? ""
+  if (previous?.fullCopy === true) {
+    if (current !== undefined && hashText(current) !== previous.hash && !options.force) {
       addItem(
         items,
         "instructions",
@@ -446,45 +467,28 @@ async function planInstructions(
       )
       return
     }
-    /* Пока манифест не добавил managed-блоки, полная копия остаётся копией
-       и обновляется из OpenCode-файла — иначе миграция «замерзала» бы. */
-    if (blocks.length === 0 && instruction.sourceText !== undefined) {
-      const content = instruction.sourceText.endsWith("\n")
-        ? instruction.sourceText
-        : `${instruction.sourceText}\n`
-      if (content !== current) {
-        actions.push({ kind: "write", target, content })
-        addItem(items, "instructions", "AGENTS.md", "mapped", "обновлена полная копия инструкций", targetDisplay)
-      } else {
-        addItem(items, "instructions", "AGENTS.md", "unchanged", undefined, targetDisplay)
-      }
-      nextState.instructions = {
-        file: target,
-        fullCopy: true,
-        hash: hashText(content),
-        blocks: {},
-      }
-      return
-    }
+    /* Старая полная копия заменяется managed-блоками: содержимое источников
+       уже попало в blocks, поэтому raw-копию можно не сохранять. */
+    base = ""
   }
 
   const removeNames =
     previous !== undefined && !previous.fullCopy
       ? Object.keys(previous.blocks).filter((name) => !blocks.some((block) => block.name === name))
       : []
-  const parsed = parseInstructionBlocks(current ?? "")
+  const parsed = parseInstructionBlocks(base)
   if (parsed.errors.length > 0) {
     addItem(items, "instructions", "AGENTS.md", "conflict", `маркеры повреждены: ${parsed.errors[0]}`, targetDisplay)
     return
   }
   const editedBlocks =
-    previous === undefined
+    previous === undefined || previous.fullCopy
       ? []
       : Object.entries(previous.blocks).filter(([name, hash]) => {
           const body = parsed.blocks.get(name)
           return body !== undefined && hashText(body) !== hash
         })
-  const rendered = renderInstructionBlocks(current ?? "", blocks, removeNames)
+  const rendered = renderInstructionBlocks(base, blocks, removeNames)
   if (!rendered.changed) {
     addItem(items, "instructions", "AGENTS.md", "unchanged", undefined, targetDisplay)
   } else {
@@ -496,17 +500,10 @@ async function planInstructions(
       editedBlocks.length > 0 ? "approximate" : "mapped",
       editedBlocks.length > 0
         ? `managed-блоки правились вне harness и перезаписаны: ${editedBlocks.map(([name]) => name).join(", ")}`
-        : undefined,
+        : primaryIsTarget
+          ? "проектный AGENTS.md дополнен managed-блоками из OpenCode"
+          : "инструкции OpenCode перенесены в managed-блоки",
       targetDisplay,
-    )
-  }
-  if (instruction.sourceText !== undefined && instruction.sourceFile !== target) {
-    addItem(
-      items,
-      "instructions",
-      "OpenCode",
-      "approximate",
-      "перенесены только managed-блоки; текст инструкций OpenCode вне маркеров не копировался",
     )
   }
   if (Buffer.byteLength(rendered.text, "utf8") > 32 * 1024) {

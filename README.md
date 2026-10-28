@@ -156,10 +156,14 @@ Codex всё равно живут в `~/.agents/skills` — это отдель
 - MCP: local `command[]` → `command` + `args`; `{env:VAR}` → `env_vars`;
   remote `Bearer {env:VAR}` → `bearer_token_env_var`, остальные env-заголовки →
   `env_http_headers`, статические → `http_headers`;
+- если `npx`-MCP не успевают появиться в сессии, Codex по умолчанию ждёт их
+  только 1 секунду: добавь в `config.toml` `mcp_optional_startup_grace_ms = 0`;
 - агенты: `developer_instructions` из body; `mode`, `permissions` и
   OpenCode-модель не переносятся — это видно в отчёте;
-- инструкции: managed-блоки с маркерами, пользовательский текст вне блоков
-  сохраняется; если Codex-файла ещё нет, допускается полная копия;
+- инструкции: переносятся `AGENTS.md` и **все файлы из `instructions`**
+  (`opencode.jsonc`); каждый файл становится managed-блоком
+  `opencode-<имя-файла>`, пользовательский текст вне блоков сохраняется;
+  проектный `AGENTS.md` остаётся общим и не заворачивается в блок;
 - live-only скиллы/агенты/MCP из фактического `.opencode` добавляются по
   умолчанию (с пометкой `approximate`); `--manifest-only` отключает это;
 - скиллы сканируются рекурсивно (коллекции вида

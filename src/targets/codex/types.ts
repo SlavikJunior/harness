@@ -30,14 +30,21 @@ export interface CodexDesiredAgent {
   origin: "manifest" | "live"
 }
 
-export type CodexInstructionsMode = "shared" | "copy" | "managed" | "none"
+export type CodexInstructionsMode = "managed" | "none"
+
+export interface CodexInstructionSource {
+  /** абсолютный путь к файлу инструкций OpenCode */
+  file: string
+  text: string
+}
 
 export interface CodexInstructionsDesired {
   mode: CodexInstructionsMode
   targetFile: string
-  /** файл OpenCode-инструкций, если он есть */
-  sourceFile?: string
-  sourceText?: string
+  /** все инструкции OpenCode: AGENTS.md + записи из `instructions` */
+  sources: CodexInstructionSource[]
+  /** файл, который одновременно является целевым (проектный AGENTS.md) */
+  primaryFile?: string
   blocks: InstructionBlock[]
 }
 

@@ -163,4 +163,48 @@ describe("codex export (global)", () => {
     expect(paths.backupsDir.startsWith(fixture.configHome)).toBe(true)
     expect(await fs.stat(paths.backupsDir).then(() => true).catch(() => false)).toBe(true)
   })
+
+  it("переносит AGENTS.md и все файлы из instructions", async () => {
+    const fixture = await setup()
+    const instructionsFile = path.join(fixture.configHome, "opencode/instructions.md")
+    const claudeFile = path.join(fixture.home, ".claude/CLAUDE.md")
+    await writeFixture(fixture.configHome, "opencode/instructions.md", "# Android instructions\n\nИспользуй Gradle.\n")
+    await writeFixture(fixture.home, ".claude/CLAUDE.md", "# Harnest profile\n\nПроверяй архитектуру.\n")
+    await writeFixture(
+      fixture.configHome,
+      "opencode/opencode.jsonc",
+      JSON.stringify({ instructions: [instructionsFile, claudeFile] }, null, 2),
+    )
+
+    const first = await run(fixture)
+    expect(first.errors).toEqual([])
+    let text = await fs.readFile(path.join(fixture.codexHome, "AGENTS.md"), "utf8")
+    expect(text).toContain("# OpenCode user text")
+    expect(text).toContain("# Android instructions")
+    expect(text).toContain("# Harnest profile")
+    expect(text).toContain("<!-- harness:begin:opencode-AGENTS.md -->")
+    expect(text).toContain("<!-- harness:begin:opencode-instructions.md -->")
+    expect(text).toContain("<!-- harness:begin:opencode-CLAUDE.md -->")
+
+    const second = await run(fixture)
+    expect(second.written).toEqual([])
+    expect((await second.items.find((entry) => entry.section === "instructions"))?.status).toBe("unchanged")
+
+    await writeFixture(fixture.configHome, "opencode/instructions.md", "# Android instructions\n\nИспользуй Koin.\n")
+    const updated = await run(fixture)
+    expect(updated.written.length).toBeGreaterThan(0)
+    text = await fs.readFile(path.join(fixture.codexHome, "AGENTS.md"), "utf8")
+    expect(text).toContain("Используй Koin")
+    expect(text).toContain("# Harnest profile")
+
+    await writeFixture(
+      fixture.configHome,
+      "opencode/opencode.jsonc",
+      JSON.stringify({ instructions: [instructionsFile] }, null, 2),
+    )
+    await run(fixture)
+    text = await fs.readFile(path.join(fixture.codexHome, "AGENTS.md"), "utf8")
+    expect(text).toContain("Используй Koin")
+    expect(text).not.toContain("# Harnest profile")
+  })
 })

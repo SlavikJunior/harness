@@ -271,4 +271,27 @@ describe("codex export (project)", () => {
     expect(await item(only, "manual")).toBeUndefined()
     expect(only.items.some((entry) => entry.name === "live-mcp")).toBe(false)
   })
+
+  it("добавляет проектные instructions в AGENTS.md, не заворачивая сам AGENTS.md в блок", async () => {
+    const fixture = await setup()
+    await writeFixture(fixture.project, "AGENTS.md", "# Project rules\n\nНе меняй публичные API.\n")
+    await writeFixture(fixture.project, "docs/AGENTS-extra.md", "# Extra rules\n\nПроверяй тесты.\n")
+    await writeFixture(
+      fixture.project,
+      ".opencode/opencode.jsonc",
+      JSON.stringify({ instructions: ["docs/AGENTS-extra.md"] }, null, 2),
+    )
+
+    const result = await run(fixture)
+    expect(result.errors).toEqual([])
+    const text = await fs.readFile(path.join(fixture.project, "AGENTS.md"), "utf8")
+    expect(text).toContain("# Project rules")
+    expect(text).toContain("# Extra rules")
+    expect(text).not.toContain("<!-- harness:begin:opencode-AGENTS.md -->")
+    expect(text).toContain("<!-- harness:begin:opencode-AGENTS-extra.md -->")
+    expect(text).toContain("<!-- harness:begin:build -->")
+
+    const second = await run(fixture)
+    expect(second.written).toEqual([])
+  })
 })

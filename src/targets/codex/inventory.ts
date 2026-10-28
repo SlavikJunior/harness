@@ -1,8 +1,9 @@
 import { promises as fs } from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { parse as parseYaml } from "yaml"
 import { parse as parseJsonc, type ParseError } from "jsonc-parser"
-import { pathExists, readText } from "../../core/fs.js"
+import { readText } from "../../core/fs.js"
 import { deepEqual } from "../../core/hash.js"
 import { instructionsFilePath, type InstructionBlock } from "../../apply/instructions.js"
 import { buildCatalog } from "../../catalog/index.js"
@@ -43,6 +44,73 @@ export async function readManifestOptional(scope: Scope): Promise<Manifest | und
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/** `instructions` в OpenCode: строка или массив строк. */
+function instructionPathList(value: unknown): string[] {
+  if (typeof value === "string") return value.trim() === "" ? [] : [value]
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
+}
+
+function expandInstructionPath(scope: Scope, value: string): string | undefined {
+  const file = value.trim()
+  if (file === "" || file.startsWith("http://") || file.startsWith("https://")) return undefined
+  if (/[{}]/.test(file)) return undefined
+  if (file === "~") return os.homedir()
+  if (file.startsWith("~/")) return path.join(os.homedir(), file.slice(2))
+  if (path.isAbsolute(file)) return path.normalize(file)
+  return path.resolve(scope.instructionsBase, file)
+}
+
+/**
+ * Все файлы инструкций OpenCode: основной AGENTS.md и записи `instructions`
+ * из opencode.jsonc. Codex читает только AGENTS.md, поэтому остальные файлы
+ * будут добавлены в него managed-блоками.
+ */
+async function readInstructionSources(
+  scope: Scope,
+  primaryFile: string,
+  items: CodexItem[],
+): Promise<{ file: string; text: string }[]> {
+  const configText = await readText(scope.configFile)
+  const configured = instructionPathList(valueAt(configText, ["instructions"]))
+  const files: string[] = [primaryFile]
+  for (const value of configured) {
+    const file = expandInstructionPath(scope, value)
+    if (file === undefined) {
+      items.push({
+        section: "instructions",
+        name: value,
+        status: "skipped",
+        message: "не удалось разобрать путь инструкций",
+      })
+      continue
+    }
+    files.push(file)
+  }
+
+  const sources: { file: string; text: string }[] = []
+  const seen = new Set<string>()
+  for (const file of files) {
+    const resolved = path.resolve(file)
+    if (seen.has(resolved)) continue
+    seen.add(resolved)
+    const text = await readText(resolved)
+    if (text === undefined || text.trim() === "") {
+      if (resolved !== path.resolve(primaryFile)) {
+        items.push({
+          section: "instructions",
+          name: path.basename(resolved),
+          status: "skipped",
+          message: `файл инструкций не найден или пуст: ${resolved}`,
+        })
+      }
+      continue
+    }
+    sources.push({ file: resolved, text })
+  }
+  return sources
 }
 
 /** Мягкий разбор frontmatter: OpenCode допускает `: ` в незакавыченном description. */
@@ -348,23 +416,13 @@ export async function inventoryCodex(
   }
 
   const instructionFile = manifest?.instructions?.file ?? "AGENTS.md"
-  const sourceFile = instructionsFilePath(scope, instructionFile)
-  const sourceText = await readText(sourceFile)
+  const primaryFile = instructionsFilePath(scope, instructionFile)
+  const sources = await readInstructionSources(scope, primaryFile, items)
   const targetFile = paths.instructionsFile
   const blocks: InstructionBlock[] = Object.entries(manifest?.instructions?.blocks ?? {}).map(
     ([name, content]): InstructionBlock => ({ name, content }),
   )
-  const targetExists = await pathExists(targetFile)
-  /* Если файл уже есть — управляем блоками (даже если это тот же AGENTS.md,
-     что у OpenCode: экспорт должен догонять изменения манифеста).
-     Полная копия — только когда целевого файла ещё нет. */
-  const mode = targetExists
-    ? "managed"
-    : sourceText !== undefined && options.manifestOnly !== true
-      ? "copy"
-      : blocks.length > 0
-        ? "managed"
-        : "none"
+  const mode = sources.length > 0 || blocks.length > 0 ? "managed" : "none"
 
   const configKeys = new Set<string>(Object.keys(manifest?.config ?? {}))
   const handledKeys = new Set(["mcp", "permissions", "policies", "agent", "agents", "instructions", "skills", "$schema"])
@@ -387,7 +445,8 @@ export async function inventoryCodex(
     instructions: {
       mode,
       targetFile,
-      ...(sourceText === undefined ? {} : { sourceFile, sourceText }),
+      sources,
+      primaryFile,
       blocks,
     },
     items,
