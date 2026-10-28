@@ -48,7 +48,9 @@ export async function readTextCapped(file: string, maxBytes = 1_000_000): Promis
 export async function writeTextAtomic(file: string, text: string): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true })
   const temp = `${file}.tmp-${process.pid}`
-  await fs.writeFile(temp, text, "utf8")
+  const mode = await fs.stat(file).then((stat) => stat.mode & 0o777).catch(() => undefined)
+  await fs.writeFile(temp, text, { encoding: "utf8", ...(mode === undefined ? {} : { mode }) })
+  if (mode !== undefined) await fs.chmod(temp, mode)
   await fs.rename(temp, file)
 }
 
